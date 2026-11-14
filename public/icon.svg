@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0e4d5f" />
+      <stop offset="100%" stop-color="#093643" />
+    </linearGradient>
+    <linearGradient id="pulseGrad" x1="88" y1="120" x2="424" y2="392" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#67e8f9" />
+      <stop offset="55%" stop-color="#2eb086" />
+      <stop offset="100%" stop-color="#8ef7e0" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" />
+  <path
+    d="M112 240L256 120L400 240"
+    stroke="url(#pulseGrad)"
+    stroke-width="32"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M154 216V356M358 216V356"
+    stroke="url(#pulseGrad)"
+    stroke-width="32"
+    stroke-linecap="round"
+  />
+  <path
+    d="M84 306H172L210 210L254 396L298 258L332 306H428"
+    stroke="#ffffff"
+    stroke-width="28"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

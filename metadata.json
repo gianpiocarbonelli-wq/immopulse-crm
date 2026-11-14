@@ -1,0 +1,6 @@
+{
+  "name": "ImmoPulse",
+  "description": "Agenda CRM Immobiliare per gestire clienti, appuntamenti, richiami, gallerie fotografiche e matching domanda/offerta.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
