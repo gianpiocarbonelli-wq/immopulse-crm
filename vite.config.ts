@@ -6,6 +6,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(() => {
   return {
+    base: './',
     plugins: [
       react(),
       tailwindcss(),
@@ -14,7 +15,7 @@ export default defineConfig(() => {
         // Avoid duplicating public/ icons already captured by workbox.globPatterns
         includeManifestIcons: false,
         manifest: {
-          id: '/',
+          id: './',
           name: 'ImmoPulse — Agenda CRM Immobiliare',
           short_name: 'ImmoPulse',
           description:
@@ -24,8 +25,8 @@ export default defineConfig(() => {
           display: 'standalone',
           display_override: ['standalone', 'minimal-ui'],
           orientation: 'any',
-          start_url: '/',
-          scope: '/',
+          start_url: './',
+         scope: './',
           lang: 'it',
           dir: 'ltr',
           categories: ['business', 'productivity'],
