@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import { UserCheck, X } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -18,6 +19,7 @@ export function AuthModal({
   onLogin,
   onRegister,
 }: AuthModalProps) {
+  const { lang } = useLanguage();
   const [mode, setMode] = useState<'login' | 'register'>(initialMode);
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -46,11 +48,17 @@ export function AuthModal({
     setErrorMsg(null);
     const normalizedEmail = loginEmail.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-      setErrorMsg('Inserisci un indirizzo email valido.');
+      setErrorMsg(
+        lang === 'en' ? 'Enter a valid email address.' : 'Inserisci un indirizzo email valido.',
+      );
       return;
     }
     if (loginPassword.length < 6) {
-      setErrorMsg('La password deve contenere almeno 6 caratteri.');
+      setErrorMsg(
+        lang === 'en'
+          ? 'Password must be at least 6 characters.'
+          : 'La password deve contenere almeno 6 caratteri.',
+      );
       return;
     }
     const err = onLogin(normalizedEmail, loginPassword);
@@ -62,25 +70,35 @@ export function AuthModal({
     setErrorMsg(null);
     const normalizedEmail = regEmail.trim().toLowerCase();
     if (!regName.trim()) {
-      setErrorMsg('Inserisci nome e cognome o nome agenzia.');
+      setErrorMsg(
+        lang === 'en'
+          ? 'Enter your full name or agency name.'
+          : 'Inserisci nome e cognome o nome agenzia.',
+      );
       return;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-      setErrorMsg('Inserisci un indirizzo email valido.');
+      setErrorMsg(
+        lang === 'en' ? 'Enter a valid email address.' : 'Inserisci un indirizzo email valido.',
+      );
       return;
     }
     if (regPassword.length < 6) {
-      setErrorMsg('La password deve contenere almeno 6 caratteri.');
+      setErrorMsg(
+        lang === 'en'
+          ? 'Password must be at least 6 characters.'
+          : 'La password deve contenere almeno 6 caratteri.',
+      );
       return;
     }
     if (regPassword !== regConfirm) {
-      setErrorMsg('Le password non coincidono.');
+      setErrorMsg(lang === 'en' ? 'Passwords do not match.' : 'Le password non coincidono.');
       return;
     }
     const err = onRegister(regName.trim(), normalizedEmail, regPassword);
     if (err) {
       setErrorMsg(err);
-      if (err.includes('Esiste già')) {
+      if (err.includes('Esiste già') || err.toLowerCase().includes('already exists')) {
         setMode('login');
         setLoginEmail(normalizedEmail);
       }
@@ -95,17 +113,18 @@ export function AuthModal({
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      className="fixed inset-0 z-50 bg-[#092b35]/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-[#092b35]/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto animate-backdrop"
     >
-      <div className="bg-white border border-[#cbe2de] w-full max-w-md rounded-2xl overflow-hidden shadow-2xl my-auto">
+      <div className="bg-white border border-[#cbe2de] w-full max-w-md rounded-t-3xl sm:rounded-2xl overflow-hidden shadow-2xl sm:my-auto animate-bottom-sheet">
         <div className="px-6 py-4 border-b border-[#e1f0ed] flex items-center justify-between bg-[#f4faf9]">
           <h2 id="auth-modal-title" className="font-bold text-base text-[#0e4d5f] flex items-center gap-2">
-            <UserCheck className="w-5 h-5 text-[#2eb086]" aria-hidden="true" /> Account ImmoPulse
+            <UserCheck className="w-5 h-5 text-[#2eb086]" aria-hidden="true" />{' '}
+            {lang === 'en' ? 'ImmoPulse Account' : 'Account ImmoPulse'}
           </h2>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Chiudi finestra accesso"
+            aria-label={lang === 'en' ? 'Close login modal' : 'Chiudi finestra accesso'}
             className="p-1.5 rounded-lg text-[#5a808a] hover:text-[#0e4d5f]"
           >
             <X className="w-5 h-5" aria-hidden="true" />
@@ -124,7 +143,7 @@ export function AuthModal({
                 mode === 'login' ? 'bg-[#0e4d5f] text-white' : 'text-[#4a707a] hover:text-[#0e4d5f]'
               }`}
             >
-              Accedi
+              {lang === 'en' ? 'Sign In' : 'Accedi'}
             </button>
             <button
               type="button"
@@ -136,7 +155,7 @@ export function AuthModal({
                 mode === 'register' ? 'bg-[#0e4d5f] text-white' : 'text-[#4a707a] hover:text-[#0e4d5f]'
               }`}
             >
-              Registrati
+              {lang === 'en' ? 'Sign Up' : 'Registrati'}
             </button>
           </div>
 
@@ -164,7 +183,7 @@ export function AuthModal({
                   required
                   value={loginEmail}
                   onChange={(e) => setLoginEmail(e.target.value)}
-                  placeholder="nome@agenzia.it"
+                  placeholder={lang === 'en' ? 'name@agency.com' : 'nome@agenzia.it'}
                   className="w-full bg-[#f4faf9] border border-[#cbe2de] rounded-lg px-3 py-2 text-[#0f3b47] focus:outline-none focus:border-[#2eb086]"
                 />
               </div>
@@ -179,7 +198,7 @@ export function AuthModal({
                   minLength={6}
                   value={loginPassword}
                   onChange={(e) => setLoginPassword(e.target.value)}
-                  placeholder="Minimo 6 caratteri"
+                  placeholder={lang === 'en' ? 'Minimum 6 characters' : 'Minimo 6 caratteri'}
                   className="w-full bg-[#f4faf9] border border-[#cbe2de] rounded-lg px-3 py-2 text-[#0f3b47] focus:outline-none focus:border-[#2eb086]"
                 />
               </div>
@@ -187,14 +206,14 @@ export function AuthModal({
                 type="submit"
                 className="w-full py-2.5 rounded-lg bg-[#0e4d5f] hover:bg-[#0a3c4a] text-white font-semibold text-xs"
               >
-                Accedi ad ImmoPulse
+                {lang === 'en' ? 'Sign In to ImmoPulse' : 'Accedi ad ImmoPulse'}
               </button>
             </form>
           ) : (
             <form onSubmit={handleRegisterSubmit} noValidate className="space-y-3">
               <div>
                 <label htmlFor="reg-name" className="block text-xs text-[#3b5e68] mb-1">
-                  Nome e Cognome / Agenzia *
+                  {lang === 'en' ? 'Full Name / Agency *' : 'Nome e Cognome / Agenzia *'}
                 </label>
                 <input
                   id="reg-name"
@@ -202,7 +221,9 @@ export function AuthModal({
                   required
                   value={regName}
                   onChange={(e) => setRegName(e.target.value)}
-                  placeholder="Es. Studio Immobiliare Rossi"
+                  placeholder={
+                    lang === 'en' ? 'e.g. Rossi Real Estate Studio' : 'Es. Studio Immobiliare Rossi'
+                  }
                   className="w-full bg-[#f4faf9] border border-[#cbe2de] rounded-lg px-3 py-2 text-[#0f3b47] focus:outline-none focus:border-[#2eb086]"
                 />
               </div>
@@ -216,7 +237,7 @@ export function AuthModal({
                   required
                   value={regEmail}
                   onChange={(e) => setRegEmail(e.target.value)}
-                  placeholder="nome@agenzia.it"
+                  placeholder={lang === 'en' ? 'name@agency.com' : 'nome@agenzia.it'}
                   className="w-full bg-[#f4faf9] border border-[#cbe2de] rounded-lg px-3 py-2 text-[#0f3b47] focus:outline-none focus:border-[#2eb086]"
                 />
               </div>
@@ -231,13 +252,13 @@ export function AuthModal({
                   minLength={6}
                   value={regPassword}
                   onChange={(e) => setRegPassword(e.target.value)}
-                  placeholder="Minimo 6 caratteri"
+                  placeholder={lang === 'en' ? 'Minimum 6 characters' : 'Minimo 6 caratteri'}
                   className="w-full bg-[#f4faf9] border border-[#cbe2de] rounded-lg px-3 py-2 text-[#0f3b47] focus:outline-none focus:border-[#2eb086]"
                 />
               </div>
               <div>
                 <label htmlFor="reg-password-confirm" className="block text-xs text-[#3b5e68] mb-1">
-                  Conferma Password *
+                  {lang === 'en' ? 'Confirm Password *' : 'Conferma Password *'}
                 </label>
                 <input
                   id="reg-password-confirm"
@@ -246,7 +267,7 @@ export function AuthModal({
                   minLength={6}
                   value={regConfirm}
                   onChange={(e) => setRegConfirm(e.target.value)}
-                  placeholder="Ripeti password"
+                  placeholder={lang === 'en' ? 'Repeat password' : 'Ripeti password'}
                   className="w-full bg-[#f4faf9] border border-[#cbe2de] rounded-lg px-3 py-2 text-[#0f3b47] focus:outline-none focus:border-[#2eb086]"
                 />
               </div>
@@ -254,7 +275,7 @@ export function AuthModal({
                 type="submit"
                 className="w-full py-2.5 rounded-lg bg-[#0e4d5f] hover:bg-[#0a3c4a] text-white font-semibold text-xs"
               >
-                Crea Account e Scegli Piano
+                {lang === 'en' ? 'Create Account & Choose Plan' : 'Crea Account e Scegli Piano'}
               </button>
             </form>
           )}

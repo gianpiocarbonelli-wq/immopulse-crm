@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import {
   ArrowUpDown,
   Car,
@@ -20,7 +21,13 @@ import {
   Trash2,
   XCircle,
 } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 import type { ClientRecord, ClientStatus } from '../types/crm';
+import {
+  getResponsiveRootMargin,
+  supportsIntersectionObserver,
+} from '../utils/lazyMedia';
+import { LazyImage } from './LazyImage';
 import {
   buildMapsUrl,
   buildWhatsAppUrl,
@@ -31,6 +38,13 @@ import {
   getLatestInteraction,
   normalizeTags,
 } from '../utils/crmLogic';
+import {
+  translateInteractionType,
+  translatePropertyType,
+  translateRole,
+  translateStatus,
+  translateSuggestedTag,
+} from '../utils/i18n';
 
 interface ClientCardProps {
   client: ClientRecord;
@@ -68,16 +82,52 @@ export function ClientCard({
   onOpenGallery,
   onRequireUpgrade,
 }: ClientCardProps) {
+  const { lang, locale } = useLanguage();
   const photos = getClientPhotos(client);
   const noteText = getClientNote(client);
   const clientTags = normalizeTags(client.tags);
   const latestInteraction = getLatestInteraction(client);
-  const formattedPrice = formatCurrencyEUR(client.price);
+  const formattedPrice = formatCurrencyEUR(client.price, lang);
   const telHref = String(client.phone || '').replace(/[^\d+]/g, '');
   const hasEmail = Boolean(client.email && client.email.trim());
   const mapsUrl = buildMapsUrl(client.address, client.zone);
   const statusDisplay = getStatusDisplay(client.status);
   const StatusIcon = statusDisplay.Icon;
+
+  const galleryContainerRef = useRef<HTMLDivElement | null>(null);
+  const [isGalleryVisible, setIsGalleryVisible] = useState<boolean>(
+    () => !supportsIntersectionObserver(),
+  );
+
+  useEffect(() => {
+    if (photos.length === 0 || isGalleryVisible) return;
+    if (!supportsIntersectionObserver()) {
+      setIsGalleryVisible(true);
+      return;
+    }
+
+    const node = galleryContainerRef.current;
+    if (!node) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting || entry.intersectionRatio > 0) {
+            setIsGalleryVisible(true);
+            observer.disconnect();
+            break;
+          }
+        }
+      },
+      {
+        rootMargin: getResponsiveRootMargin(window.innerWidth, 'vertical'),
+        threshold: 0.01,
+      },
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [photos.length, isGalleryVisible]);
 
   let reminderLabel: string | null = null;
   let reminderOverdue = false;
@@ -85,7 +135,7 @@ export function ClientCard({
     const rDate = new Date(client.reminderDate);
     if (!Number.isNaN(rDate.getTime())) {
       reminderOverdue = rDate < new Date();
-      reminderLabel = rDate.toLocaleString('it-IT', {
+      reminderLabel = rDate.toLocaleString(locale, {
         month: 'short',
         day: 'numeric',
         hour: '2-digit',
@@ -97,18 +147,20 @@ export function ClientCard({
   return (
     <article
       data-testid={`client-card-${client.id}`}
-      className="bg-white border border-[#cbe2de] rounded-xl p-4 flex flex-col justify-between hover:border-[#2eb086] transition-colors"
+      className="client-card-optimized bg-white border border-[#cbe2de] rounded-xl p-4 flex flex-col justify-between hover:border-[#2eb086] transition-colors"
     >
       <div className="space-y-3">
         {/* Header: Unboxed metadata kicker + primary title + edit/delete */}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 text-xs font-medium text-[#4a707a]">
-              <span className="text-[#0e4d5f] font-semibold">{client.role}</span>
+              <span className="text-[#0e4d5f] font-semibold">
+                {translateRole(client.role, lang)}
+              </span>
               <span aria-hidden="true">·</span>
               <span className={`inline-flex items-center gap-1 font-semibold ${statusDisplay.textClass}`}>
                 <StatusIcon className="w-3.5 h-3.5" aria-hidden="true" />
-                {client.status}
+                {translateStatus(client.status, lang)}
               </span>
             </div>
             <h3 className="font-bold text-base text-[#0e4d5f] mt-1 truncate">{client.name}</h3>
@@ -121,10 +173,22 @@ export function ClientCard({
               aria-pressed={Boolean(client.isFavorite)}
               aria-label={
                 client.isFavorite
-                  ? `Rimuovi ${client.name} dai preferiti`
-                  : `Contrassegna ${client.name} come preferito`
+                  ? lang === 'en'
+                    ? `Remove ${client.name} from favorites`
+                    : `Rimuovi ${client.name} dai preferiti`
+                  : lang === 'en'
+                    ? `Mark ${client.name} as favorite`
+                    : `Contrassegna ${client.name} come preferito`
               }
-              title={client.isFavorite ? 'Rimuovi dai preferiti' : 'Contrassegna come preferito'}
+              title={
+                client.isFavorite
+                  ? lang === 'en'
+                    ? 'Remove from favorites'
+                    : 'Rimuovi dai preferiti'
+                  : lang === 'en'
+                    ? 'Mark as favorite'
+                    : 'Contrassegna come preferito'
+              }
               className={`p-2 rounded-lg transition-colors focus-visible:outline-2 focus-visible:outline-[#0e4d5f] ${
                 client.isFavorite
                   ? 'text-amber-500 hover:bg-amber-50'
@@ -139,8 +203,16 @@ export function ClientCard({
             <button
               type="button"
               onClick={() => onDownloadPdf(client.id)}
-              aria-label={`Scarica PDF di ${client.name}`}
-              title={`Scarica scheda PDF di ${client.name}`}
+              aria-label={
+                lang === 'en'
+                  ? `Download PDF for ${client.name}`
+                  : `Scarica PDF di ${client.name}`
+              }
+              title={
+                lang === 'en'
+                  ? `Download PDF card for ${client.name}`
+                  : `Scarica scheda PDF di ${client.name}`
+              }
               className="p-2 rounded-lg text-[#5a808a] hover:text-[#177858] hover:bg-[#eef6f5] transition-colors focus-visible:outline-2 focus-visible:outline-[#0e4d5f]"
             >
               <FileDown className="w-4 h-4" aria-hidden="true" />
@@ -148,8 +220,8 @@ export function ClientCard({
             <button
               type="button"
               onClick={() => onEdit(client.id)}
-              aria-label={`Modifica ${client.name}`}
-              title={`Modifica ${client.name}`}
+              aria-label={lang === 'en' ? `Edit ${client.name}` : `Modifica ${client.name}`}
+              title={lang === 'en' ? `Edit ${client.name}` : `Modifica ${client.name}`}
               className="p-2 rounded-lg text-[#5a808a] hover:text-[#0e4d5f] hover:bg-[#eef6f5] transition-colors focus-visible:outline-2 focus-visible:outline-[#0e4d5f]"
             >
               <Edit3 className="w-4 h-4" aria-hidden="true" />
@@ -157,8 +229,8 @@ export function ClientCard({
             <button
               type="button"
               onClick={() => onDelete(client.id)}
-              aria-label={`Elimina ${client.name}`}
-              title={`Elimina ${client.name}`}
+              aria-label={lang === 'en' ? `Delete ${client.name}` : `Elimina ${client.name}`}
+              title={lang === 'en' ? `Delete ${client.name}` : `Elimina ${client.name}`}
               className="p-2 rounded-lg text-[#5a808a] hover:text-rose-700 hover:bg-rose-50 transition-colors focus-visible:outline-2 focus-visible:outline-rose-600"
             >
               <Trash2 className="w-4 h-4" aria-hidden="true" />
@@ -170,9 +242,16 @@ export function ClientCard({
         <div className="pt-2.5 border-t border-[#e4f0ee] space-y-1.5 text-xs text-[#3b5e68]">
           <div className="flex items-baseline justify-between gap-2">
             <span className="font-semibold text-[#0e4d5f] truncate">
-              {client.propertyType || 'Immobile'}
+              {client.propertyType
+                ? translatePropertyType(client.propertyType, lang)
+                : lang === 'en'
+                  ? 'Property'
+                  : 'Immobile'}
               {client.sqm > 0 && (
-                <span className="font-normal text-[#4a707a] tabular-nums"> · {client.sqm} m²</span>
+                <span className="font-normal text-[#4a707a] tabular-nums">
+                  {' '}
+                  · {client.sqm} {lang === 'en' ? 'sqm' : 'm²'}
+                </span>
               )}
             </span>
             <span className="text-[#177858] font-bold font-mono tabular-nums whitespace-nowrap shrink-0">
@@ -183,7 +262,7 @@ export function ClientCard({
           <div className="text-[#4a707a] flex items-center gap-1.5 min-w-0">
             <MapPin className="w-3.5 h-3.5 text-[#2eb086] shrink-0" aria-hidden="true" />
             <span className="truncate">
-              {client.zone || 'Zona non specificata'}
+              {client.zone || (lang === 'en' ? 'Area not specified' : 'Zona non specificata')}
               {client.address ? ` — ${client.address}` : ''}
             </span>
           </div>
@@ -196,7 +275,11 @@ export function ClientCard({
               {client.condoFees > 0 && (
                 <>
                   <span aria-hidden="true">·</span>
-                  <span>Spese € {client.condoFees}/mese</span>
+                  <span>
+                    {lang === 'en'
+                      ? `Fees € ${client.condoFees}/mo`
+                      : `Spese € ${client.condoFees}/mese`}
+                  </span>
                 </>
               )}
             </div>
@@ -206,40 +289,53 @@ export function ClientCard({
             <div className="flex flex-wrap items-center gap-3 pt-0.5 text-[11px] text-[#4a707a]">
               {client.hasElevator && (
                 <span className="inline-flex items-center gap-1">
-                  <ArrowUpDown className="w-3 h-3 text-[#0e4d5f]" aria-hidden="true" /> Ascensore
+                  <ArrowUpDown className="w-3 h-3 text-[#0e4d5f]" aria-hidden="true" />{' '}
+                  {lang === 'en' ? 'Elevator' : 'Ascensore'}
                 </span>
               )}
               {client.hasBalcony && (
                 <span className="inline-flex items-center gap-1">
-                  <Sun className="w-3 h-3 text-amber-600" aria-hidden="true" /> Balcone
+                  <Sun className="w-3 h-3 text-amber-600" aria-hidden="true" />{' '}
+                  {lang === 'en' ? 'Balcony' : 'Balcone'}
                 </span>
               )}
               {client.hasGarage && (
                 <span className="inline-flex items-center gap-1">
-                  <Car className="w-3 h-3 text-[#1d8f6a]" aria-hidden="true" /> Box
+                  <Car className="w-3 h-3 text-[#1d8f6a]" aria-hidden="true" />{' '}
+                  {lang === 'en' ? 'Garage' : 'Box'}
                 </span>
               )}
             </div>
           )}
         </div>
 
-        {/* Multi-photo preview */}
+        {/* Multi-photo preview with viewport + horizontal lazy loading */}
         {photos.length > 0 && (
-          <div className="space-y-1.5">
+          <div ref={galleryContainerRef} className="space-y-1.5">
             <button
               type="button"
               onClick={() => onOpenGallery(client.id, 0)}
-              aria-label={`Apri galleria foto immobile di ${client.name} (${photos.length} foto)`}
-              className="relative block w-full group rounded-lg overflow-hidden border border-[#cbe2de] focus-visible:outline-2 focus-visible:outline-[#0e4d5f]"
+              aria-label={
+                lang === 'en'
+                  ? `Open property gallery for ${client.name} (${photos.length} photos)`
+                  : `Apri galleria foto immobile di ${client.name} (${photos.length} foto)`
+              }
+              className="relative block w-full group rounded-lg overflow-hidden border border-[#cbe2de] bg-[#eef6f5] focus-visible:outline-2 focus-visible:outline-[#0e4d5f]"
             >
-              <img
+              <LazyImage
                 src={photos[0]}
-                alt={`Foto immobile di ${client.name}`}
-                referrerPolicy="no-referrer"
-                className="w-full h-28 object-cover"
+                alt={
+                  lang === 'en'
+                    ? `Property photo for ${client.name}`
+                    : `Foto immobile di ${client.name}`
+                }
+                direction="vertical"
+                wrapperClassName="w-full h-28 bg-[#eef6f5]"
+                className="w-full h-28 object-cover md:group-hover:scale-[1.02] transition-transform duration-300"
               />
               <span className="absolute bottom-1.5 right-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-[#0e4d5f]/90 text-white inline-flex items-center gap-1 tabular-nums">
-                <Images className="w-3 h-3" aria-hidden="true" /> {photos.length} foto
+                <Images className="w-3 h-3" aria-hidden="true" /> {photos.length}{' '}
+                {lang === 'en' ? 'photos' : 'foto'}
               </span>
             </button>
 
@@ -250,15 +346,28 @@ export function ClientCard({
                     key={`${client.id}-thumb-${idx}`}
                     type="button"
                     onClick={() => onOpenGallery(client.id, idx)}
-                    aria-label={`Vedi foto ${idx + 1} di ${client.name}`}
-                    className="shrink-0 rounded-md overflow-hidden border border-[#cbe2de] hover:border-[#2eb086] transition-colors focus-visible:outline-2 focus-visible:outline-[#0e4d5f]"
+                    aria-label={
+                      lang === 'en'
+                        ? `View photo ${idx + 1} for ${client.name}`
+                        : `Vedi foto ${idx + 1} di ${client.name}`
+                    }
+                    className="shrink-0 rounded-md overflow-hidden border border-[#cbe2de] hover:border-[#2eb086] transition-colors bg-[#eef6f5] focus-visible:outline-2 focus-visible:outline-[#0e4d5f]"
                   >
-                    <img
-                      src={src}
-                      alt={`Miniatura ${idx + 1} immobile ${client.name}`}
-                      referrerPolicy="no-referrer"
-                      className="w-10 h-10 object-cover"
-                    />
+                    {isGalleryVisible ? (
+                      <LazyImage
+                        src={src}
+                        alt={
+                          lang === 'en'
+                            ? `Thumbnail ${idx + 1} for ${client.name}`
+                            : `Miniatura ${idx + 1} immobile ${client.name}`
+                        }
+                        direction="horizontal"
+                        wrapperClassName="w-10 h-10 bg-[#eef6f5]"
+                        className="w-10 h-10 object-cover"
+                      />
+                    ) : (
+                      <div aria-hidden="true" className="w-10 h-10 bg-[#eef6f5] animate-pulse" />
+                    )}
                   </button>
                 ))}
               </div>
@@ -271,18 +380,23 @@ export function ClientCard({
             data-testid="client-card-tags"
             className="flex flex-wrap items-center gap-1.5 pt-1"
           >
-            {clientTags.map((tag) =>
-              onSelectTag ? (
+            {clientTags.map((tag) => {
+              const displayTag = translateSuggestedTag(tag, lang);
+              return onSelectTag ? (
                 <button
                   key={tag}
                   type="button"
                   onClick={() => onSelectTag(tag)}
-                  aria-label={`Filtra per etichetta ${tag}`}
-                  title={`Filtra per "${tag}"`}
+                  aria-label={
+                    lang === 'en'
+                      ? `Filter by tag ${displayTag}`
+                      : `Filtra per etichetta ${displayTag}`
+                  }
+                  title={lang === 'en' ? `Filter by "${displayTag}"` : `Filtra per "${displayTag}"`}
                   className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#eef6f5] hover:bg-[#dceceb] text-[#0e4d5f] border border-[#cbe2de] text-[11px] font-medium transition-colors"
                 >
                   <Tag className="w-2.5 h-2.5 text-[#2eb086] shrink-0" aria-hidden="true" />
-                  <span>{tag}</span>
+                  <span>{displayTag}</span>
                 </button>
               ) : (
                 <span
@@ -290,10 +404,10 @@ export function ClientCard({
                   className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#eef6f5] text-[#0e4d5f] border border-[#cbe2de] text-[11px] font-medium"
                 >
                   <Tag className="w-2.5 h-2.5 text-[#2eb086] shrink-0" aria-hidden="true" />
-                  <span>{tag}</span>
+                  <span>{displayTag}</span>
                 </span>
-              ),
-            )}
+              );
+            })}
           </div>
         )}
 
@@ -315,11 +429,11 @@ export function ClientCard({
             <History className="w-3.5 h-3.5 text-[#2eb086] shrink-0 mt-0.5" aria-hidden="true" />
             <div className="min-w-0 leading-snug">
               <div className="flex flex-wrap items-center gap-1 text-[11px] font-semibold text-[#0e4d5f]">
-                <span>Ultimo contatto:</span>
-                <span>{latestInteraction.type}</span>
+                <span>{lang === 'en' ? 'Last contact:' : 'Ultimo contatto:'}</span>
+                <span>{translateInteractionType(latestInteraction.type, lang)}</span>
                 <span aria-hidden="true">·</span>
                 <span className="font-normal text-[#5a808a] tabular-nums">
-                  {formatInteractionDate(latestInteraction.date)}
+                  {formatInteractionDate(latestInteraction.date, lang)}
                 </span>
               </div>
               {latestInteraction.note && (
@@ -337,8 +451,8 @@ export function ClientCard({
           >
             <Clock className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
             <span>
-              Richiamo: {reminderLabel}
-              {reminderOverdue ? ' (Scaduto)' : ''}
+              {lang === 'en' ? 'Follow-up:' : 'Richiamo:'} {reminderLabel}
+              {reminderOverdue ? (lang === 'en' ? ' (Overdue)' : ' (Scaduto)') : ''}
             </span>
           </div>
         )}
@@ -349,29 +463,35 @@ export function ClientCard({
         {telHref ? (
           <a
             href={`tel:${telHref}`}
-            aria-label={`Chiama ${client.name}`}
+            aria-label={lang === 'en' ? `Call ${client.name}` : `Chiama ${client.name}`}
             className="flex flex-col items-center justify-center py-2 px-1 rounded-lg bg-[#f4faf9] hover:bg-[#e2f3ef] text-[#0e4d5f] hover:text-[#177858] transition-colors"
           >
             <Phone className="w-4 h-4" aria-hidden="true" />
-            <span className="text-[11px] mt-1 font-medium whitespace-nowrap">Chiama</span>
+            <span className="text-[11px] mt-1 font-medium whitespace-nowrap">
+              {lang === 'en' ? 'Call' : 'Chiama'}
+            </span>
           </a>
         ) : (
           <span
             aria-disabled="true"
-            title="Telefono non valido"
+            title={lang === 'en' ? 'Invalid phone number' : 'Telefono non valido'}
             className="flex flex-col items-center justify-center py-2 px-1 rounded-lg bg-[#f4faf9] text-[#8bb3bd] opacity-60 cursor-not-allowed"
           >
             <Phone className="w-4 h-4" aria-hidden="true" />
-            <span className="text-[11px] mt-1 font-medium whitespace-nowrap">Chiama</span>
+            <span className="text-[11px] mt-1 font-medium whitespace-nowrap">
+              {lang === 'en' ? 'Call' : 'Chiama'}
+            </span>
           </span>
         )}
 
         {allowExtraChannels ? (
           <a
-            href={buildWhatsAppUrl(client.phone, client.name, client.zone, client.propertyType)}
+            href={buildWhatsAppUrl(client.phone, client.name, client.zone, client.propertyType, lang)}
             target="_blank"
             rel="noopener noreferrer"
-            aria-label={`Invia WhatsApp a ${client.name}`}
+            aria-label={
+              lang === 'en' ? `Send WhatsApp to ${client.name}` : `Invia WhatsApp a ${client.name}`
+            }
             className="flex flex-col items-center justify-center py-2 px-1 rounded-lg bg-[#f4faf9] hover:bg-[#2eb086]/15 text-[#0e4d5f] hover:text-[#177858] transition-colors"
           >
             <MessageSquare className="w-4 h-4" aria-hidden="true" />
@@ -382,10 +502,16 @@ export function ClientCard({
             type="button"
             onClick={() =>
               onRequireUpgrade(
-                'WhatsApp è bloccato in modalità Ospite (max 3 clienti, solo Chiama ed Email).',
+                lang === 'en'
+                  ? 'WhatsApp is locked in Guest mode (max 3 clients, Call & Email only).'
+                  : 'WhatsApp è bloccato in modalità Ospite (max 3 clienti, solo Chiama ed Email).',
               )
             }
-            aria-label={`Sblocca WhatsApp per ${client.name}`}
+            aria-label={
+              lang === 'en'
+                ? `Unlock WhatsApp for ${client.name}`
+                : `Sblocca WhatsApp per ${client.name}`
+            }
             className="relative flex flex-col items-center justify-center py-2 px-1 rounded-lg bg-slate-100 text-slate-500 hover:bg-amber-50 hover:text-amber-800 transition-colors"
           >
             <Lock className="w-3 h-3 absolute top-1 right-1 text-amber-600" aria-hidden="true" />
@@ -397,7 +523,9 @@ export function ClientCard({
         {hasEmail ? (
           <a
             href={`mailto:${client.email.trim()}`}
-            aria-label={`Invia Email a ${client.name}`}
+            aria-label={
+              lang === 'en' ? `Send Email to ${client.name}` : `Invia Email a ${client.name}`
+            }
             className="flex flex-col items-center justify-center py-2 px-1 rounded-lg bg-[#f4faf9] hover:bg-[#e2f3ef] text-[#0e4d5f] transition-colors"
           >
             <Mail className="w-4 h-4" aria-hidden="true" />
@@ -406,7 +534,7 @@ export function ClientCard({
         ) : (
           <span
             aria-disabled="true"
-            title="Email non inserita"
+            title={lang === 'en' ? 'No email entered' : 'Email non inserita'}
             className="flex flex-col items-center justify-center py-2 px-1 rounded-lg bg-[#f4faf9] text-[#8bb3bd] opacity-60 cursor-not-allowed"
           >
             <Mail className="w-4 h-4" aria-hidden="true" />
@@ -419,35 +547,45 @@ export function ClientCard({
             type="button"
             onClick={() =>
               onRequireUpgrade(
-                'La funzione Mappa è bloccata in modalità Ospite (max 3 clienti, solo Chiama ed Email).',
+                lang === 'en'
+                  ? 'Maps is locked in Guest mode (max 3 clients, Call & Email only).'
+                  : 'La funzione Mappa è bloccata in modalità Ospite (max 3 clienti, solo Chiama ed Email).',
               )
             }
-            aria-label={`Sblocca Mappa per ${client.name}`}
+            aria-label={
+              lang === 'en' ? `Unlock Map for ${client.name}` : `Sblocca Mappa per ${client.name}`
+            }
             className="relative flex flex-col items-center justify-center py-2 px-1 rounded-lg bg-slate-100 text-slate-500 hover:bg-amber-50 hover:text-amber-800 transition-colors"
           >
             <Lock className="w-3 h-3 absolute top-1 right-1 text-amber-600" aria-hidden="true" />
             <Navigation className="w-4 h-4" aria-hidden="true" />
-            <span className="text-[11px] mt-1 font-medium whitespace-nowrap">Mappa</span>
+            <span className="text-[11px] mt-1 font-medium whitespace-nowrap">
+              {lang === 'en' ? 'Map' : 'Mappa'}
+            </span>
           </button>
         ) : mapsUrl ? (
           <a
             href={mapsUrl}
             target="_blank"
             rel="noopener noreferrer"
-            aria-label={`Apri Mappa per ${client.name}`}
+            aria-label={lang === 'en' ? `Open Map for ${client.name}` : `Apri Mappa per ${client.name}`}
             className="flex flex-col items-center justify-center py-2 px-1 rounded-lg bg-[#f4faf9] hover:bg-cyan-50 text-[#0e4d5f] hover:text-[#116f7d] transition-colors"
           >
             <Navigation className="w-4 h-4" aria-hidden="true" />
-            <span className="text-[11px] mt-1 font-medium whitespace-nowrap">Mappa</span>
+            <span className="text-[11px] mt-1 font-medium whitespace-nowrap">
+              {lang === 'en' ? 'Map' : 'Mappa'}
+            </span>
           </a>
         ) : (
           <span
             aria-disabled="true"
-            title="Indirizzo non inserito"
+            title={lang === 'en' ? 'No address entered' : 'Indirizzo non inserito'}
             className="flex flex-col items-center justify-center py-2 px-1 rounded-lg bg-[#f4faf9] text-[#8bb3bd] opacity-60 cursor-not-allowed"
           >
             <Navigation className="w-4 h-4" aria-hidden="true" />
-            <span className="text-[11px] mt-1 font-medium whitespace-nowrap">Mappa</span>
+            <span className="text-[11px] mt-1 font-medium whitespace-nowrap">
+              {lang === 'en' ? 'Map' : 'Mappa'}
+            </span>
           </span>
         )}
       </div>

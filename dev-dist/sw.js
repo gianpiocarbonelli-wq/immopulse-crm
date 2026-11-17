@@ -67,7 +67,7 @@ if (!self.define) {
     });
   };
 }
-define(['./workbox-afac4cd2'], (function (workbox) { 'use strict';
+define(['./workbox-39895644'], (function (workbox) { 'use strict';
 
   self.skipWaiting();
   workbox.clientsClaim();
@@ -77,18 +77,48 @@ define(['./workbox-afac4cd2'], (function (workbox) { 'use strict';
    * See https://goo.gl/S9QRab
    */
   workbox.precacheAndRoute([{
+    "url": "suppress-warnings.js",
+    "revision": "d41d8cd98f00b204e9800998ecf8427e"
+  }, {
     "url": "index.html",
-    "revision": "0.ve68rogveh8"
+    "revision": "0.8ovom17psn8"
   }], {});
   workbox.cleanupOutdatedCaches();
   workbox.registerRoute(new workbox.NavigationRoute(workbox.createHandlerBoundToURL("index.html"), {
     allowlist: [/^\/$/],
-    denylist: [/^\/api/, /^\/ws/]
+    denylist: [/^\/api\//, /^\/ws\//, /\/[^/?]+\.(?:png|jpg|jpeg|gif|webp|svg|ico|webmanifest|js|css|json)$/i]
   }));
-  workbox.registerRoute(/^https:\/\/fonts\.googleapis\.com\/.*/i, new workbox.CacheFirst({
+  workbox.registerRoute(({
+    url
+  }) => url.pathname.startsWith("/api/"), new workbox.NetworkOnly(), 'GET');
+  workbox.registerRoute(({
+    request,
+    url
+  }) => url.origin === self.location.origin && (request.destination === "image" || /\.(?:png|jpg|jpeg|webp|gif|svg|ico)$/i.test(url.pathname)), new workbox.StaleWhileRevalidate({
+    "cacheName": "local-images-cache",
+    plugins: [new workbox.ExpirationPlugin({
+      maxEntries: 60,
+      maxAgeSeconds: 2592000
+    }), new workbox.CacheableResponsePlugin({
+      statuses: [200]
+    })]
+  }), 'GET');
+  workbox.registerRoute(({
+    request,
+    url
+  }) => url.origin !== self.location.origin && request.destination === "image", new workbox.CacheFirst({
+    "cacheName": "external-images-cache",
+    plugins: [new workbox.ExpirationPlugin({
+      maxEntries: 40,
+      maxAgeSeconds: 604800
+    }), new workbox.CacheableResponsePlugin({
+      statuses: [0, 200]
+    })]
+  }), 'GET');
+  workbox.registerRoute(/^https:\/\/fonts\.googleapis\.com\/.*/i, new workbox.StaleWhileRevalidate({
     "cacheName": "google-fonts-cache",
     plugins: [new workbox.ExpirationPlugin({
-      maxEntries: 10,
+      maxEntries: 20,
       maxAgeSeconds: 31536000
     }), new workbox.CacheableResponsePlugin({
       statuses: [0, 200]
@@ -97,7 +127,7 @@ define(['./workbox-afac4cd2'], (function (workbox) { 'use strict';
   workbox.registerRoute(/^https:\/\/fonts\.gstatic\.com\/.*/i, new workbox.CacheFirst({
     "cacheName": "gstatic-fonts-cache",
     plugins: [new workbox.ExpirationPlugin({
-      maxEntries: 10,
+      maxEntries: 40,
       maxAgeSeconds: 31536000
     }), new workbox.CacheableResponsePlugin({
       statuses: [0, 200]

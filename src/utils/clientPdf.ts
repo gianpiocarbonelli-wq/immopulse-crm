@@ -7,6 +7,15 @@ import {
   normalizeHistory,
   normalizeTags,
 } from './crmLogic';
+import {
+  getLocale,
+  translateInteractionType,
+  translatePropertyType,
+  translateRole,
+  translateStatus,
+  translateSuggestedTag,
+  type AppLanguage,
+} from './i18n';
 
 export interface PdfDetailRow {
   label: string;
@@ -40,44 +49,53 @@ export function sanitizePdfText(value: unknown): string {
     .trim();
 }
 
-export function formatPdfCurrency(price: number | undefined): string {
-  if (!price || price <= 0) return 'Non specificato';
-  return `EUR ${new Intl.NumberFormat('it-IT', {
+export function formatPdfCurrency(
+  price: number | undefined,
+  lang: AppLanguage = 'it',
+): string {
+  if (!price || price <= 0) return lang === 'en' ? 'Not specified' : 'Non specificato';
+  return `EUR ${new Intl.NumberFormat(getLocale(lang), {
     maximumFractionDigits: 0,
   }).format(price)}`;
 }
 
-export function buildClientPdfFilename(clientName: string): string {
+export function buildClientPdfFilename(
+  clientName: string,
+  lang: AppLanguage = 'it',
+): string {
   const normalized = String(clientName || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-zA-Z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
-  const base = normalized || 'Cliente';
-  return `Scheda_${base}.pdf`;
+  const base = normalized || (lang === 'en' ? 'Client' : 'Cliente');
+  const prefix = lang === 'en' ? 'Card' : 'Scheda';
+  return `${prefix}_${base}.pdf`;
 }
 
 export function buildClientPdfSections(
   client: ClientRecord,
   generatedAt: Date = new Date(),
+  lang: AppLanguage = 'it',
 ): ClientPdfSections {
-  const tags = normalizeTags(client.tags);
+  const tags = normalizeTags(client.tags).map((t) => translateSuggestedTag(t, lang));
   const note = getClientNote(client);
   const photos = getClientPhotos(client);
   const historyItems: ClientInteraction[] = normalizeHistory(client.history);
+  const locale = getLocale(lang);
 
-  const generatedLabel = generatedAt.toLocaleDateString('it-IT', {
+  const generatedLabel = generatedAt.toLocaleDateString(locale, {
     day: '2-digit',
     month: 'long',
     year: 'numeric',
   });
 
-  let reminderLabel = 'Nessun promemoria';
+  let reminderLabel = lang === 'en' ? 'No reminder' : 'Nessun promemoria';
   if (client.reminderDate) {
     const d = new Date(client.reminderDate);
     reminderLabel = Number.isNaN(d.getTime())
       ? client.reminderDate
-      : d.toLocaleString('it-IT', {
+      : d.toLocaleString(locale, {
           day: '2-digit',
           month: 'short',
           year: 'numeric',
@@ -87,38 +105,81 @@ export function buildClientPdfSections(
   }
 
   const features: string[] = [];
-  if (client.hasElevator) features.push('Ascensore');
-  if (client.hasBalcony) features.push('Balcone / Terrazzo');
-  if (client.hasGarage) features.push('Garage / Posto Auto');
+  if (client.hasElevator) features.push(lang === 'en' ? 'Elevator' : 'Ascensore');
+  if (client.hasBalcony) features.push(lang === 'en' ? 'Balcony / Terrace' : 'Balcone / Terrazzo');
+  if (client.hasGarage) features.push(lang === 'en' ? 'Garage / Parking' : 'Garage / Posto Auto');
+
+  const notSpecM = lang === 'en' ? 'Not specified' : 'Non specificato';
+  const notSpecF = lang === 'en' ? 'Not specified' : 'Non specificata';
 
   const contactRows: PdfDetailRow[] = [
-    { label: 'Telefono', value: client.phone || 'Non specificato' },
-    { label: 'Email', value: client.email?.trim() || 'Non specificata' },
-    { label: 'Prossimo richiamo', value: reminderLabel },
+    { label: lang === 'en' ? 'Phone' : 'Telefono', value: client.phone || notSpecM },
+    { label: 'Email', value: client.email?.trim() || notSpecF },
+    { label: lang === 'en' ? 'Next Follow-up' : 'Prossimo richiamo', value: reminderLabel },
   ];
 
   const propertyRows: PdfDetailRow[] = [
-    { label: 'Tipologia', value: client.propertyType || 'Appartamento' },
-    { label: 'Prezzo / Budget', value: formatPdfCurrency(client.price) },
-    { label: 'Superficie', value: client.sqm > 0 ? `${client.sqm} mq` : 'Non specificata' },
-    { label: 'Vani', value: client.rooms?.trim() || 'Non specificati' },
-    { label: 'Piano', value: client.floor?.trim() || 'Non specificato' },
     {
-      label: 'Spese condominiali',
-      value: client.condoFees > 0 ? `EUR ${client.condoFees}/mese` : 'Non specificate',
+      label: lang === 'en' ? 'Property Type' : 'Tipologia',
+      value: translatePropertyType(client.propertyType || 'Appartamento', lang),
     },
-    { label: 'Zona / Quartiere', value: client.zone?.trim() || 'Non specificata' },
-    { label: 'Indirizzo', value: client.address?.trim() || 'Non specificato' },
-    { label: 'Dotazioni', value: features.length > 0 ? features.join(', ') : 'Nessuna indicata' },
+    {
+      label: lang === 'en' ? 'Price / Budget' : 'Prezzo / Budget',
+      value: formatPdfCurrency(client.price, lang),
+    },
+    {
+      label: lang === 'en' ? 'Floor Area' : 'Superficie',
+      value:
+        client.sqm > 0
+          ? `${client.sqm} ${lang === 'en' ? 'sqm' : 'mq'}`
+          : notSpecF,
+    },
+    {
+      label: lang === 'en' ? 'Rooms' : 'Vani',
+      value: client.rooms?.trim() || (lang === 'en' ? 'Not specified' : 'Non specificati'),
+    },
+    {
+      label: lang === 'en' ? 'Floor' : 'Piano',
+      value: client.floor?.trim() || notSpecM,
+    },
+    {
+      label: lang === 'en' ? 'Condo Fees' : 'Spese condominiali',
+      value:
+        client.condoFees > 0
+          ? `EUR ${client.condoFees}/${lang === 'en' ? 'month' : 'mese'}`
+          : lang === 'en'
+            ? 'Not specified'
+            : 'Non specificate',
+    },
+    {
+      label: lang === 'en' ? 'Area / District' : 'Zona / Quartiere',
+      value: client.zone?.trim() || notSpecF,
+    },
+    {
+      label: lang === 'en' ? 'Address' : 'Indirizzo',
+      value: client.address?.trim() || notSpecM,
+    },
+    {
+      label: lang === 'en' ? 'Amenities' : 'Dotazioni',
+      value:
+        features.length > 0
+          ? features.join(', ')
+          : lang === 'en'
+            ? 'None listed'
+            : 'Nessuna indicata',
+    },
   ];
 
-  const statusParts: string[] = [client.role, client.status];
+  const statusParts: string[] = [
+    translateRole(client.role, lang),
+    translateStatus(client.status, lang),
+  ];
   if (client.isFavorite) {
-    statusParts.push('Cliente Preferito');
+    statusParts.push(lang === 'en' ? 'Favorite Client' : 'Cliente Preferito');
   }
 
   return {
-    title: client.name || 'Cliente senza nome',
+    title: client.name || (lang === 'en' ? 'Unnamed client' : 'Cliente senza nome'),
     subtitle: statusParts.join(' - '),
     generatedLabel,
     contactRows,
@@ -126,8 +187,8 @@ export function buildClientPdfSections(
     tags,
     note,
     history: historyItems.map((entry) => ({
-      dateLabel: formatInteractionDate(entry.date),
-      type: entry.type,
+      dateLabel: formatInteractionDate(entry.date, lang),
+      type: translateInteractionType(entry.type, lang),
       note: entry.note || '-',
     })),
     primaryPhotoDataUrl: photos[0] || null,
@@ -136,9 +197,10 @@ export function buildClientPdfSections(
 
 export function generateClientPdfDocument(
   client: ClientRecord,
-  options: { generatedAt?: Date; compress?: boolean } = {},
+  options: { generatedAt?: Date; compress?: boolean; lang?: AppLanguage } = {},
 ): jsPDF {
-  const sections = buildClientPdfSections(client, options.generatedAt);
+  const lang: AppLanguage = options.lang ?? 'it';
+  const sections = buildClientPdfSections(client, options.generatedAt, lang);
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
@@ -178,7 +240,13 @@ export function generateClientPdfDocument(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(46, 176, 134);
-  doc.text('ImmoPulse - Agenda CRM Immobiliare', marginX, 11);
+  doc.text(
+    lang === 'en'
+      ? 'ImmoPulse - Real Estate CRM Agenda'
+      : 'ImmoPulse - Agenda CRM Immobiliare',
+    marginX,
+    11,
+  );
 
   doc.setFontSize(18);
   doc.setTextColor(255, 255, 255);
@@ -192,7 +260,11 @@ export function generateClientPdfDocument(
 
   doc.setFontSize(8.5);
   doc.text(
-    sanitizePdfText(`Generato il ${sections.generatedLabel}`),
+    sanitizePdfText(
+      lang === 'en'
+        ? `Generated on ${sections.generatedLabel}`
+        : `Generato il ${sections.generatedLabel}`,
+    ),
     pageWidth - marginX,
     11,
     { align: 'right' },
@@ -201,7 +273,7 @@ export function generateClientPdfDocument(
   y = 40;
 
   // Section 1: Main Details (Contacts + Property)
-  drawSectionHeading('Dettagli Principali');
+  drawSectionHeading(lang === 'en' ? 'Main Details' : 'Dettagli Principali');
 
   const allDetailRows = [...sections.contactRows, ...sections.propertyRows];
   const colWidth = (contentWidth - 6) / 2;
@@ -242,13 +314,19 @@ export function generateClientPdfDocument(
   y += 2;
 
   // Section 2: Tags
-  drawSectionHeading('Etichette / Tag');
+  drawSectionHeading(lang === 'en' ? 'Tags & Labels' : 'Etichette / Tag');
   if (sections.tags.length === 0) {
     ensureSpace(8);
     doc.setFont('helvetica', 'italic');
     doc.setFontSize(9.5);
     doc.setTextColor(90, 128, 138);
-    doc.text('Nessuna etichetta associata a questo cliente.', marginX, y);
+    doc.text(
+      lang === 'en'
+        ? 'No tags associated with this client.'
+        : 'Nessuna etichetta associata a questo cliente.',
+      marginX,
+      y,
+    );
     y += 8;
   } else {
     let tagX = marginX;
@@ -281,13 +359,13 @@ export function generateClientPdfDocument(
   }
 
   // Section 3: Note
-  drawSectionHeading('Note Cliente');
+  drawSectionHeading(lang === 'en' ? 'Client Notes' : 'Note Cliente');
   if (!sections.note) {
     ensureSpace(8);
     doc.setFont('helvetica', 'italic');
     doc.setFontSize(9.5);
     doc.setTextColor(90, 128, 138);
-    doc.text('Nessuna nota registrata.', marginX, y);
+    doc.text(lang === 'en' ? 'No notes recorded.' : 'Nessuna nota registrata.', marginX, y);
     y += 8;
   } else {
     doc.setFont('helvetica', 'normal');
@@ -314,7 +392,7 @@ export function generateClientPdfDocument(
       const drawW = Math.max(20, imgProps.width * ratio);
       const drawH = Math.max(15, imgProps.height * ratio);
 
-      drawSectionHeading('Immagine Principale');
+      drawSectionHeading(lang === 'en' ? 'Primary Image' : 'Immagine Principale');
       ensureSpace(drawH + 6);
       doc.addImage(sections.primaryPhotoDataUrl, format, marginX, y - 1, drawW, drawH);
       y += drawH + 6;
@@ -324,13 +402,23 @@ export function generateClientPdfDocument(
   }
 
   // Section 4: Chronological Activity History
-  drawSectionHeading(`Cronologia Attivita (${sections.history.length})`);
+  drawSectionHeading(
+    lang === 'en'
+      ? `Activity Timeline (${sections.history.length})`
+      : `Cronologia Attivita (${sections.history.length})`,
+  );
   if (sections.history.length === 0) {
     ensureSpace(8);
     doc.setFont('helvetica', 'italic');
     doc.setFontSize(9.5);
     doc.setTextColor(90, 128, 138);
-    doc.text('Nessuna attivita registrata in cronologia.', marginX, y);
+    doc.text(
+      lang === 'en'
+        ? 'No activity recorded in timeline.'
+        : 'Nessuna attivita registrata in cronologia.',
+      marginX,
+      y,
+    );
     y += 8;
   } else {
     for (const item of sections.history) {
@@ -367,21 +455,33 @@ export function generateClientPdfDocument(
     doc.setFontSize(8);
     doc.setTextColor(120, 148, 156);
     doc.text(
-      sanitizePdfText(`ImmoPulse CRM - Scheda ${sections.title}`),
+      sanitizePdfText(
+        lang === 'en'
+          ? `ImmoPulse CRM - Card ${sections.title}`
+          : `ImmoPulse CRM - Scheda ${sections.title}`,
+      ),
       marginX,
       pageHeight - 8,
     );
-    doc.text(`Pagina ${page} di ${pageCount}`, pageWidth - marginX, pageHeight - 8, {
-      align: 'right',
-    });
+    doc.text(
+      lang === 'en' ? `Page ${page} of ${pageCount}` : `Pagina ${page} di ${pageCount}`,
+      pageWidth - marginX,
+      pageHeight - 8,
+      {
+        align: 'right',
+      },
+    );
   }
 
   return doc;
 }
 
-export function downloadClientPdf(client: ClientRecord): string {
-  const filename = buildClientPdfFilename(client.name);
-  const doc = generateClientPdfDocument(client);
+export function downloadClientPdf(
+  client: ClientRecord,
+  lang: AppLanguage = 'it',
+): string {
+  const filename = buildClientPdfFilename(client.name, lang);
+  const doc = generateClientPdfDocument(client, { lang });
   doc.save(filename);
   return filename;
 }

@@ -23,6 +23,13 @@ import {
   removeTagFromList,
 } from '../utils/crmLogic';
 import { compressImageFile } from '../utils/imageCompression';
+import { useLanguage } from '../contexts/LanguageContext';
+import {
+  translateInteractionType,
+  translatePropertyType,
+  translateSuggestedTag,
+} from '../utils/i18n';
+import { LazyImage } from './LazyImage';
 
 interface ClientFormModalProps {
   isOpen: boolean;
@@ -41,6 +48,8 @@ export function ClientFormModal({
   onDownloadPdf,
   onNotify,
 }: ClientFormModalProps) {
+  const { lang } = useLanguage();
+  const isEn = lang === 'en';
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
@@ -135,14 +144,20 @@ export function ClientFormModal({
 
     const remaining = MAX_PHOTOS_PER_CLIENT - photos.length;
     if (remaining <= 0) {
-      setErrorMsg(`Hai già raggiunto il massimo di ${MAX_PHOTOS_PER_CLIENT} immagini per questo cliente.`);
+      setErrorMsg(
+        isEn
+          ? `You have already reached the maximum of ${MAX_PHOTOS_PER_CLIENT} images for this client.`
+          : `Hai già raggiunto il massimo di ${MAX_PHOTOS_PER_CLIENT} immagini per questo cliente.`,
+      );
       return;
     }
 
     const toProcess = files.slice(0, remaining);
     if (files.length > remaining) {
       onNotify(
-        `Selezionate troppe foto: caricate solo le prime ${remaining} (max ${MAX_PHOTOS_PER_CLIENT}).`,
+        isEn
+          ? `Too many photos selected: only the first ${remaining} were uploaded (max ${MAX_PHOTOS_PER_CLIENT}).`
+          : `Selezionate troppe foto: caricate solo le prime ${remaining} (max ${MAX_PHOTOS_PER_CLIENT}).`,
         'error',
       );
     }
@@ -155,8 +170,16 @@ export function ClientFormModal({
           nextPhotos.push(compressed);
         }
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : 'Formato non supportato';
-        onNotify(`Immagine ignorata (${file.name}): ${message}`, 'error');
+        const message =
+          err instanceof Error
+            ? err.message
+            : isEn
+              ? 'Unsupported format'
+              : 'Formato non supportato';
+        onNotify(
+          isEn ? `Image skipped (${file.name}): ${message}` : `Immagine ignorata (${file.name}): ${message}`,
+          'error',
+        );
       }
     }
     setPhotos(nextPhotos);
@@ -226,20 +249,34 @@ export function ClientFormModal({
     const trimmedPhone = phone.trim();
     const trimmedEmail = email.trim();
     if (!trimmedName || !trimmedPhone) {
-      setErrorMsg('Inserisci nome e numero di telefono.');
+      setErrorMsg(
+        isEn ? 'Please enter full name and phone number.' : 'Inserisci nome e numero di telefono.',
+      );
       return;
     }
     if (trimmedPhone.replace(/\D/g, '').length < 6) {
-      setErrorMsg('Inserisci un numero di telefono valido (almeno 6 cifre).');
+      setErrorMsg(
+        isEn
+          ? 'Please enter a valid phone number (at least 6 digits).'
+          : 'Inserisci un numero di telefono valido (almeno 6 cifre).',
+      );
       return;
     }
     if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
-      setErrorMsg('Inserisci un indirizzo email valido oppure lascia il campo vuoto.');
+      setErrorMsg(
+        isEn
+          ? 'Please enter a valid email address or leave the field blank.'
+          : 'Inserisci un indirizzo email valido oppure lascia il campo vuoto.',
+      );
       return;
     }
 
     if ([price, sqm, condoFees].some((v) => v !== '' && (!Number.isFinite(Number(v)) || Number(v) < 0))) {
-      setErrorMsg('Prezzo, superficie e spese condominiali devono essere numeri validi e non negativi.');
+      setErrorMsg(
+        isEn
+          ? 'Price, area, and condo fees must be valid non-negative numbers.'
+          : 'Prezzo, superficie e spese condominiali devono essere numeri validi e non negativi.',
+      );
       return;
     }
 
@@ -249,7 +286,11 @@ export function ClientFormModal({
   const handleAddTag = () => {
     if (!tagInput.trim()) return;
     if (tags.length >= MAX_TAGS_PER_CLIENT) {
-      setErrorMsg(`Puoi inserire al massimo ${MAX_TAGS_PER_CLIENT} etichette per cliente.`);
+      setErrorMsg(
+        isEn
+          ? `You can add up to ${MAX_TAGS_PER_CLIENT} tags per client.`
+          : `Puoi inserire al massimo ${MAX_TAGS_PER_CLIENT} etichette per cliente.`,
+      );
       return;
     }
     setTags((prev) => addTagToList(prev, tagInput));
@@ -270,7 +311,11 @@ export function ClientFormModal({
       return;
     }
     if (tags.length >= MAX_TAGS_PER_CLIENT) {
-      setErrorMsg(`Puoi inserire al massimo ${MAX_TAGS_PER_CLIENT} etichette per cliente.`);
+      setErrorMsg(
+        isEn
+          ? `You can add up to ${MAX_TAGS_PER_CLIENT} tags per client.`
+          : `Puoi inserire al massimo ${MAX_TAGS_PER_CLIENT} etichette per cliente.`,
+      );
       return;
     }
     setTags((prev) => addTagToList(prev, suggested));
@@ -280,7 +325,11 @@ export function ClientFormModal({
     setErrorMsg(null);
     const trimmedNote = historyNote.trim();
     if (!trimmedNote) {
-      setErrorMsg("Inserisci una nota breve per registrare l'attività nello storico.");
+      setErrorMsg(
+        isEn
+          ? 'Please enter a short note to log the activity in history.'
+          : "Inserisci una nota breve per registrare l'attività nello storico.",
+      );
       return;
     }
     const newEntry: ClientInteraction = {
@@ -316,18 +365,26 @@ export function ClientFormModal({
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      className="fixed inset-0 z-50 bg-[#092b35]/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-[#092b35]/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto animate-backdrop"
     >
-      <div className="bg-white border border-[#cbe2de] w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden my-auto flex flex-col max-h-[90vh]">
+      <div className="bg-white border border-[#cbe2de] w-full max-w-2xl rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden sm:my-auto flex flex-col max-h-[92vh] animate-bottom-sheet">
         <div className="px-6 py-4 border-b border-[#e1f0ed] flex items-center justify-between bg-[#f4faf9] sticky top-0 z-10">
           <h2 id="client-modal-title" className="text-base font-bold text-[#0e4d5f] flex items-center gap-2">
             <UserPlus className="w-5 h-5 text-[#2eb086]" aria-hidden="true" />
-            <span>{editingClient ? 'Modifica Scheda Cliente' : 'Nuovo Cliente Immobiliare'}</span>
+            <span>
+              {editingClient
+                ? isEn
+                  ? 'Edit Client Card'
+                  : 'Modifica Scheda Cliente'
+                : isEn
+                  ? 'New Real Estate Client'
+                  : 'Nuovo Cliente Immobiliare'}
+            </span>
           </h2>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Chiudi finestra cliente"
+            aria-label={isEn ? 'Close client modal' : 'Chiudi finestra cliente'}
             className="p-1.5 rounded-lg text-[#5a808a] hover:text-[#0e4d5f] hover:bg-[#e1f0ed]"
           >
             <X className="w-5 h-5" aria-hidden="true" />
@@ -344,12 +401,12 @@ export function ClientFormModal({
           {/* Section 1: Anagrafica */}
           <div className="space-y-3">
             <h3 className="text-xs font-bold text-[#177858] uppercase tracking-wider">
-              1. Anagrafica e Contatti
+              {isEn ? '1. Profile & Contact Details' : '1. Anagrafica e Contatti'}
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label htmlFor="field-name" className="block text-xs text-[#3b5e68] mb-1">
-                  Nome e Cognome *
+                  {isEn ? 'Full Name *' : 'Nome e Cognome *'}
                 </label>
                 <input
                   id="field-name"
@@ -357,13 +414,13 @@ export function ClientFormModal({
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Es. Marco Rossi"
+                  placeholder={isEn ? 'e.g. Marco Rossi' : 'Es. Marco Rossi'}
                   className="w-full bg-[#f4faf9] border border-[#cbe2de] rounded-lg px-3 py-2 text-[#0f3b47] focus:outline-none focus:border-[#2eb086]"
                 />
               </div>
               <div>
                 <label htmlFor="field-phone" className="block text-xs text-[#3b5e68] mb-1">
-                  Telefono / Cellulare *
+                  {isEn ? 'Phone / Mobile *' : 'Telefono / Cellulare *'}
                 </label>
                 <input
                   id="field-phone"
@@ -371,7 +428,7 @@ export function ClientFormModal({
                   required
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  placeholder="Es. 3391234567"
+                  placeholder={isEn ? 'e.g. 3391234567' : 'Es. 3391234567'}
                   className="w-full bg-[#f4faf9] border border-[#cbe2de] rounded-lg px-3 py-2 text-[#0f3b47] focus:outline-none focus:border-[#2eb086]"
                 />
               </div>
@@ -390,7 +447,7 @@ export function ClientFormModal({
               </div>
               <div>
                 <label htmlFor="field-role" className="block text-xs text-[#3b5e68] mb-1">
-                  Ruolo Cliente *
+                  {isEn ? 'Client Role *' : 'Ruolo Cliente *'}
                 </label>
                 <select
                   id="field-role"
@@ -399,10 +456,18 @@ export function ClientFormModal({
                   onChange={(e) => setRole(e.target.value as ClientRole)}
                   className="w-full bg-[#f4faf9] border border-[#cbe2de] rounded-lg px-3 py-2 text-[#0f3b47] focus:outline-none focus:border-[#2eb086]"
                 >
-                  <option value="Acquirente">Acquirente (Cerca da comprare)</option>
-                  <option value="Venditore">Venditore (Proprietario)</option>
-                  <option value="Inquilino">Inquilino (Cerca in affitto)</option>
-                  <option value="Locatore">Locatore (Affitta immobile)</option>
+                  <option value="Acquirente">
+                    {isEn ? 'Buyer (Looking to buy)' : 'Acquirente (Cerca da comprare)'}
+                  </option>
+                  <option value="Venditore">
+                    {isEn ? 'Seller (Owner)' : 'Venditore (Proprietario)'}
+                  </option>
+                  <option value="Inquilino">
+                    {isEn ? 'Tenant (Looking to rent)' : 'Inquilino (Cerca in affitto)'}
+                  </option>
+                  <option value="Locatore">
+                    {isEn ? 'Landlord (Renting property)' : 'Locatore (Affitta immobile)'}
+                  </option>
                 </select>
               </div>
             </div>
@@ -413,12 +478,12 @@ export function ClientFormModal({
           {/* Section 2: Immobile */}
           <div className="space-y-3">
             <h3 className="text-xs font-bold text-[#177858] uppercase tracking-wider">
-              2. Immobile / Parametri Ricerca
+              {isEn ? '2. Property / Search Criteria' : '2. Immobile / Parametri Ricerca'}
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label htmlFor="field-propertyType" className="block text-xs text-[#3b5e68] mb-1">
-                  Tipologia Immobile
+                  {isEn ? 'Property Type' : 'Tipologia Immobile'}
                 </label>
                 <select
                   id="field-propertyType"
@@ -428,27 +493,27 @@ export function ClientFormModal({
                 >
                   {PROPERTY_TYPES.map((type) => (
                     <option key={type} value={type}>
-                      {type}
+                      {translatePropertyType(type, lang)}
                     </option>
                   ))}
                 </select>
               </div>
               <div>
                 <label htmlFor="field-zone" className="block text-xs text-[#3b5e68] mb-1">
-                  Zona / Quartiere
+                  {isEn ? 'Area / Neighborhood' : 'Zona / Quartiere'}
                 </label>
                 <input
                   id="field-zone"
                   type="text"
                   value={zone}
                   onChange={(e) => setZone(e.target.value)}
-                  placeholder="Es. Centro, Monza, Navigli..."
+                  placeholder={isEn ? 'e.g. City Center, Monza, Navigli...' : 'Es. Centro, Monza, Navigli...'}
                   className="w-full bg-[#f4faf9] border border-[#cbe2de] rounded-lg px-3 py-2 text-[#0f3b47] focus:outline-none focus:border-[#2eb086]"
                 />
               </div>
               <div>
                 <label htmlFor="field-price" className="block text-xs text-[#3b5e68] mb-1">
-                  Prezzo / Budget (€)
+                  {isEn ? 'Price / Budget (€)' : 'Prezzo / Budget (€)'}
                 </label>
                 <input
                   id="field-price"
@@ -465,7 +530,7 @@ export function ClientFormModal({
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div>
                 <label htmlFor="field-sqm" className="block text-xs text-[#3b5e68] mb-1">
-                  Superficie (m²)
+                  {isEn ? 'Area (sqm)' : 'Superficie (m²)'}
                 </label>
                 <input
                   id="field-sqm"
@@ -479,33 +544,33 @@ export function ClientFormModal({
               </div>
               <div>
                 <label htmlFor="field-rooms" className="block text-xs text-[#3b5e68] mb-1">
-                  Vani
+                  {isEn ? 'Rooms' : 'Vani'}
                 </label>
                 <input
                   id="field-rooms"
                   type="text"
                   value={rooms}
                   onChange={(e) => setRooms(e.target.value)}
-                  placeholder="3 locali"
+                  placeholder={isEn ? '3 rooms' : '3 locali'}
                   className="w-full bg-[#f4faf9] border border-[#cbe2de] rounded-lg px-3 py-2 text-[#0f3b47] focus:outline-none focus:border-[#2eb086]"
                 />
               </div>
               <div>
                 <label htmlFor="field-floor" className="block text-xs text-[#3b5e68] mb-1">
-                  Piano
+                  {isEn ? 'Floor' : 'Piano'}
                 </label>
                 <input
                   id="field-floor"
                   type="text"
                   value={floor}
                   onChange={(e) => setFloor(e.target.value)}
-                  placeholder="2° piano"
+                  placeholder={isEn ? '2nd floor' : '2° piano'}
                   className="w-full bg-[#f4faf9] border border-[#cbe2de] rounded-lg px-3 py-2 text-[#0f3b47] focus:outline-none focus:border-[#2eb086]"
                 />
               </div>
               <div>
                 <label htmlFor="field-condoFees" className="block text-xs text-[#3b5e68] mb-1">
-                  Spese Cond. (€/mese)
+                  {isEn ? 'Condo Fees (€/mo)' : 'Spese Cond. (€/mese)'}
                 </label>
                 <input
                   id="field-condoFees"
@@ -521,7 +586,7 @@ export function ClientFormModal({
 
             <div>
               <label htmlFor="field-address" className="block text-xs text-[#3b5e68] mb-1">
-                Indirizzo Esatto (Per Google Maps)
+                {isEn ? 'Exact Address (For Google Maps)' : 'Indirizzo Esatto (Per Google Maps)'}
               </label>
               <input
                 id="field-address"
@@ -541,7 +606,7 @@ export function ClientFormModal({
                   onChange={(e) => setHasElevator(e.target.checked)}
                   className="rounded border-[#cbe2de] accent-[#2eb086]"
                 />
-                <span>Ascensore</span>
+                <span>{isEn ? 'Elevator' : 'Ascensore'}</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer text-[#3b5e68]">
                 <input
@@ -550,7 +615,7 @@ export function ClientFormModal({
                   onChange={(e) => setHasBalcony(e.target.checked)}
                   className="rounded border-[#cbe2de] accent-[#2eb086]"
                 />
-                <span>Balcone / Terrazzo</span>
+                <span>{isEn ? 'Balcony / Terrace' : 'Balcone / Terrazzo'}</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer text-[#3b5e68]">
                 <input
@@ -559,7 +624,7 @@ export function ClientFormModal({
                   onChange={(e) => setHasGarage(e.target.checked)}
                   className="rounded border-[#cbe2de] accent-[#2eb086]"
                 />
-                <span>Garage / Posto Auto</span>
+                <span>{isEn ? 'Garage / Parking' : 'Garage / Posto Auto'}</span>
               </label>
             </div>
           </div>
@@ -569,12 +634,12 @@ export function ClientFormModal({
           {/* Section 3: Trattativa & Promemoria */}
           <div className="space-y-3">
             <h3 className="text-xs font-bold text-[#177858] uppercase tracking-wider">
-              3. Stato Trattativa e Promemoria
+              {isEn ? '3. Deal Status & Reminders' : '3. Stato Trattativa e Promemoria'}
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label htmlFor="field-status" className="block text-xs text-[#3b5e68] mb-1">
-                  Esito / Stato *
+                  {isEn ? 'Outcome / Status *' : 'Esito / Stato *'}
                 </label>
                 <select
                   id="field-status"
@@ -583,15 +648,23 @@ export function ClientFormModal({
                   onChange={(e) => setStatus(e.target.value as ClientStatus)}
                   className="w-full bg-[#f4faf9] border border-[#cbe2de] rounded-lg px-3 py-2 text-[#0f3b47] focus:outline-none focus:border-[#2eb086]"
                 >
-                  <option value="In corso">In corso (Primo contatto / Visita)</option>
-                  <option value="Trattativa">Trattativa (Proposta fatta)</option>
-                  <option value="Accettato">Accettato (Rogito / Chiuso positivo)</option>
-                  <option value="Perso">Perso (Trattativa fallita)</option>
+                  <option value="In corso">
+                    {isEn ? 'In progress (First contact / Viewing)' : 'In corso (Primo contatto / Visita)'}
+                  </option>
+                  <option value="Trattativa">
+                    {isEn ? 'Negotiation (Offer submitted)' : 'Trattativa (Proposta fatta)'}
+                  </option>
+                  <option value="Accettato">
+                    {isEn ? 'Accepted (Closing / Won)' : 'Accettato (Rogito / Chiuso positivo)'}
+                  </option>
+                  <option value="Perso">
+                    {isEn ? 'Lost (Deal fell through)' : 'Perso (Trattativa fallita)'}
+                  </option>
                 </select>
               </div>
               <div>
                 <label htmlFor="field-reminderDate" className="block text-xs text-[#3b5e68] mb-1">
-                  Data e Ora Prossimo Richiamo
+                  {isEn ? 'Next Follow-up Date & Time' : 'Data e Ora Prossimo Richiamo'}
                 </label>
                 <input
                   id="field-reminderDate"
@@ -605,14 +678,18 @@ export function ClientFormModal({
 
             <div>
               <label htmlFor="field-note" className="block text-xs text-[#3b5e68] mb-1">
-                Note
+                {isEn ? 'Notes' : 'Note'}
               </label>
               <textarea
                 id="field-note"
                 rows={3}
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
-                placeholder="Esigenze cliente, esito visite, trattabilità prezzo..."
+                placeholder={
+                  isEn
+                    ? 'Client requirements, viewing outcome, price negotiability...'
+                    : 'Esigenze cliente, esito visite, trattabilità prezzo...'
+                }
                 className="w-full bg-[#f4faf9] border border-[#cbe2de] rounded-lg p-3 text-[#0f3b47] focus:outline-none focus:border-[#2eb086]"
               />
             </div>
@@ -620,7 +697,9 @@ export function ClientFormModal({
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label htmlFor="field-tag-input" className="block text-xs text-[#3b5e68]">
-                  Etichette / Tag Personalizzati (es. investimento, vista mare, ristrutturato)
+                  {isEn
+                    ? 'Custom Tags / Labels (e.g. investment, sea view, renovated)'
+                    : 'Etichette / Tag Personalizzati (es. investimento, vista mare, ristrutturato)'}
                 </label>
                 <span className="text-xs font-semibold text-[#0e4d5f] font-mono tabular-nums">
                   {tags.length} / {MAX_TAGS_PER_CLIENT}
@@ -639,7 +718,9 @@ export function ClientFormModal({
                     value={tagInput}
                     onChange={(e) => setTagInput(e.target.value)}
                     onKeyDown={handleTagInputKeyDown}
-                    placeholder="Scrivi un'etichetta e premi Invio..."
+                    placeholder={
+                      isEn ? 'Type a tag and press Enter...' : "Scrivi un'etichetta e premi Invio..."
+                    }
                     className="w-full bg-[#f4faf9] border border-[#cbe2de] rounded-lg pl-8 pr-3 py-2 text-[#0f3b47] focus:outline-none focus:border-[#2eb086]"
                   />
                 </div>
@@ -649,7 +730,7 @@ export function ClientFormModal({
                   className="px-3 py-2 rounded-lg bg-[#eef6f5] hover:bg-[#dceceb] text-[#0e4d5f] border border-[#cbe2de] text-xs font-semibold inline-flex items-center gap-1 whitespace-nowrap"
                 >
                   <Plus className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>Aggiungi</span>
+                  <span>{isEn ? 'Add' : 'Aggiungi'}</span>
                 </button>
               </div>
 
@@ -660,11 +741,11 @@ export function ClientFormModal({
                       key={tag}
                       className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#0e4d5f] text-white text-xs font-medium"
                     >
-                      <span>{tag}</span>
+                      <span>{translateSuggestedTag(tag, lang)}</span>
                       <button
                         type="button"
                         onClick={() => setTags((prev) => removeTagFromList(prev, tag))}
-                        aria-label={`Rimuovi etichetta ${tag}`}
+                        aria-label={isEn ? `Remove tag ${tag}` : `Rimuovi etichetta ${tag}`}
                         className="p-0.5 rounded hover:bg-white/20 transition-colors"
                       >
                         <X className="w-3 h-3" aria-hidden="true" />
@@ -675,9 +756,12 @@ export function ClientFormModal({
               )}
 
               <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                <span className="text-[11px] text-[#5a808a] mr-0.5">Suggerite:</span>
+                <span className="text-[11px] text-[#5a808a] mr-0.5">
+                  {isEn ? 'Suggested:' : 'Suggerite:'}
+                </span>
                 {SUGGESTED_CLIENT_TAGS.map((suggested) => {
                   const active = tags.some((t) => t.toLowerCase() === suggested.toLowerCase());
+                  const displayTag = translateSuggestedTag(suggested, lang);
                   return (
                     <button
                       key={suggested}
@@ -690,7 +774,7 @@ export function ClientFormModal({
                           : 'bg-white border-[#cbe2de] text-[#4a707a] hover:bg-[#eef6f5] hover:text-[#0e4d5f]'
                       }`}
                     >
-                      {active ? `✓ ${suggested}` : `+ ${suggested}`}
+                      {active ? `✓ ${displayTag}` : `+ ${displayTag}`}
                     </button>
                   );
                 })}
@@ -701,10 +785,11 @@ export function ClientFormModal({
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-[#177858] uppercase tracking-wider inline-flex items-center gap-1.5">
                   <History className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>Storico Attività e Contatti</span>
+                  <span>{isEn ? 'Activity & Contact History' : 'Storico Attività e Contatti'}</span>
                 </span>
                 <span className="text-xs font-semibold text-[#0e4d5f] font-mono tabular-nums">
-                  {history.length} attività
+                  {history.length}{' '}
+                  {isEn ? (history.length === 1 ? 'activity' : 'activities') : 'attività'}
                 </span>
               </div>
 
@@ -712,7 +797,7 @@ export function ClientFormModal({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div>
                     <label htmlFor="field-history-date" className="block text-[11px] text-[#3b5e68] mb-1">
-                      Data e Ora Attività
+                      {isEn ? 'Activity Date & Time' : 'Data e Ora Attività'}
                     </label>
                     <input
                       id="field-history-date"
@@ -724,7 +809,7 @@ export function ClientFormModal({
                   </div>
                   <div>
                     <label htmlFor="field-history-type" className="block text-[11px] text-[#3b5e68] mb-1">
-                      Tipo Contatto
+                      {isEn ? 'Contact Type' : 'Tipo Contatto'}
                     </label>
                     <select
                       id="field-history-type"
@@ -734,7 +819,7 @@ export function ClientFormModal({
                     >
                       {VALID_INTERACTION_TYPES.map((t) => (
                         <option key={t} value={t}>
-                          {t}
+                          {translateInteractionType(t, lang)}
                         </option>
                       ))}
                     </select>
@@ -744,7 +829,7 @@ export function ClientFormModal({
                 <div className="flex gap-2">
                   <div className="flex-1">
                     <label htmlFor="field-history-note" className="sr-only">
-                      Nota breve attività
+                      {isEn ? 'Short activity note' : 'Nota breve attività'}
                     </label>
                     <input
                       id="field-history-note"
@@ -752,7 +837,11 @@ export function ClientFormModal({
                       value={historyNote}
                       onChange={(e) => setHistoryNote(e.target.value)}
                       onKeyDown={handleHistoryKeyDown}
-                      placeholder="Nota breve attività (es. Confermato interesse visita)"
+                      placeholder={
+                        isEn
+                          ? 'Short activity note (e.g. Confirmed viewing interest)'
+                          : 'Nota breve attività (es. Confermato interesse visita)'
+                      }
                       className="w-full bg-white border border-[#cbe2de] rounded-lg px-3 py-1.5 text-xs text-[#0f3b47] focus:outline-none focus:border-[#2eb086]"
                     />
                   </div>
@@ -762,7 +851,7 @@ export function ClientFormModal({
                     className="px-3 py-1.5 rounded-lg bg-[#0e4d5f] hover:bg-[#0a3c4a] text-white text-xs font-semibold inline-flex items-center gap-1 whitespace-nowrap"
                   >
                     <Plus className="w-3.5 h-3.5" aria-hidden="true" />
-                    <span>Aggiungi attività</span>
+                    <span>{isEn ? 'Add activity' : 'Aggiungi attività'}</span>
                   </button>
                 </div>
               </div>
@@ -772,7 +861,9 @@ export function ClientFormModal({
                   data-testid="form-history-empty"
                   className="text-xs text-[#5a808a] italic px-1"
                 >
-                  Nessuna attività registrata per questo cliente.
+                  {isEn
+                    ? 'No activities logged for this client yet.'
+                    : 'Nessuna attività registrata per questo cliente.'}
                 </p>
               ) : (
                 <ul
@@ -787,10 +878,10 @@ export function ClientFormModal({
                       <div className="min-w-0 space-y-0.5">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <span className="px-1.5 py-0.5 rounded bg-[#eef6f5] text-[#0e4d5f] font-semibold text-[11px]">
-                            {entry.type}
+                            {translateInteractionType(entry.type, lang)}
                           </span>
                           <span className="text-[11px] text-[#5a808a] tabular-nums">
-                            {formatInteractionDate(entry.date)}
+                            {formatInteractionDate(entry.date, lang)}
                           </span>
                         </div>
                         <p className="text-[#0f3b47] leading-snug">{entry.note}</p>
@@ -798,8 +889,12 @@ export function ClientFormModal({
                       <button
                         type="button"
                         onClick={() => handleRemoveHistoryEntry(entry.id)}
-                        aria-label={`Rimuovi attività ${entry.type} ${entry.note}`}
-                        title="Rimuovi attività"
+                        aria-label={
+                          isEn
+                            ? `Remove activity ${entry.type} ${entry.note}`
+                            : `Rimuovi attività ${entry.type} ${entry.note}`
+                        }
+                        title={isEn ? 'Remove activity' : 'Rimuovi attività'}
                         className="p-1 rounded-md text-[#5a808a] hover:text-rose-700 hover:bg-rose-50 shrink-0 transition-colors"
                       >
                         <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
@@ -813,10 +908,12 @@ export function ClientFormModal({
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label htmlFor="field-photoFile" className="block text-xs text-[#3b5e68]">
-                  Foto / Planimetrie Immobile (Fino a {MAX_PHOTOS_PER_CLIENT} immagini)
+                  {isEn
+                    ? `Property Photos / Floor Plans (Up to ${MAX_PHOTOS_PER_CLIENT} images)`
+                    : `Foto / Planimetrie Immobile (Fino a ${MAX_PHOTOS_PER_CLIENT} immagini)`}
                 </label>
                 <span className="text-xs font-semibold text-[#0e4d5f] font-mono tabular-nums">
-                  {photos.length} / {MAX_PHOTOS_PER_CLIENT} foto
+                  {photos.length} / {MAX_PHOTOS_PER_CLIENT} {isEn ? 'photos' : 'foto'}
                 </span>
               </div>
               <input
@@ -836,19 +933,19 @@ export function ClientFormModal({
                         key={`modal-photo-${idx}`}
                         className="relative rounded-lg overflow-hidden border border-[#cbe2de] bg-[#f4faf9]"
                       >
-                        <img
+                        <LazyImage
                           src={src}
-                          alt={`Anteprima foto ${idx + 1}`}
-                          referrerPolicy="no-referrer"
+                          alt={isEn ? `Photo preview ${idx + 1}` : `Anteprima foto ${idx + 1}`}
+                          wrapperClassName="w-full h-20 bg-[#f4faf9]"
                           className="w-full h-20 object-cover"
                         />
                         <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-[#0e4d5f]/85 text-white text-[10px] font-bold">
-                          {idx === 0 ? '1 (Principale)' : idx + 1}
+                          {idx === 0 ? (isEn ? '1 (Primary)' : '1 (Principale)') : idx + 1}
                         </span>
                         <button
                           type="button"
                           onClick={() => setPhotos((prev) => prev.filter((_, i) => i !== idx))}
-                          aria-label={`Rimuovi foto ${idx + 1}`}
+                          aria-label={isEn ? `Remove photo ${idx + 1}` : `Rimuovi foto ${idx + 1}`}
                           className="absolute top-1 right-1 w-5 h-5 rounded-full bg-rose-600 text-white text-xs flex items-center justify-center hover:bg-rose-700"
                         >
                           &times;
@@ -861,7 +958,7 @@ export function ClientFormModal({
                     onClick={() => setPhotos([])}
                     className="px-3 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-medium"
                   >
-                    Rimuovi tutte le foto
+                    {isEn ? 'Remove all photos' : 'Rimuovi tutte le foto'}
                   </button>
                 </div>
               )}
@@ -877,7 +974,7 @@ export function ClientFormModal({
                   className="px-3.5 py-2 rounded-lg bg-white hover:bg-[#eef6f5] text-[#0e4d5f] border border-[#cbe2de] text-xs font-semibold inline-flex items-center gap-1.5"
                 >
                   <FileDown className="w-3.5 h-3.5 text-[#2eb086]" aria-hidden="true" />
-                  <span>Scarica PDF</span>
+                  <span>{isEn ? 'Download PDF' : 'Scarica PDF'}</span>
                 </button>
               )}
             </div>
@@ -887,13 +984,13 @@ export function ClientFormModal({
                 onClick={onClose}
                 className="px-4 py-2 rounded-lg bg-[#eef6f5] hover:bg-[#dceceb] text-[#3b5e68] text-xs font-semibold"
               >
-                Annulla
+                {isEn ? 'Cancel' : 'Annulla'}
               </button>
               <button
                 type="submit"
                 className="px-5 py-2 rounded-lg bg-[#0e4d5f] hover:bg-[#0a3c4a] text-white text-xs font-semibold"
               >
-                Salva Scheda Cliente
+                {isEn ? 'Save Client Card' : 'Salva Scheda Cliente'}
               </button>
             </div>
           </div>

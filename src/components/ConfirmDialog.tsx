@@ -1,4 +1,5 @@
 import { AlertTriangle, X } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 import type { ConfirmDialogState } from '../types/crm';
 
 interface ConfirmDialogProps {
@@ -7,6 +8,7 @@ interface ConfirmDialogProps {
 }
 
 export function ConfirmDialog({ dialog, onCancel }: ConfirmDialogProps) {
+  const { lang } = useLanguage();
   if (!dialog) return null;
 
   return (
@@ -17,9 +19,9 @@ export function ConfirmDialog({ dialog, onCancel }: ConfirmDialogProps) {
       onClick={(e) => {
         if (e.target === e.currentTarget) onCancel();
       }}
-      className="fixed inset-0 z-[60] bg-[#092b35]/60 backdrop-blur-xs flex items-center justify-center p-4"
+      className="fixed inset-0 z-[60] bg-[#092b35]/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-backdrop"
     >
-      <div className="bg-white border border-[#cbe2de] w-full max-w-md rounded-2xl p-6 space-y-4 shadow-2xl">
+      <div className="bg-white border border-[#cbe2de] w-full max-w-md rounded-t-3xl sm:rounded-2xl p-6 space-y-4 shadow-2xl animate-bottom-sheet">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <AlertTriangle
@@ -35,7 +37,7 @@ export function ConfirmDialog({ dialog, onCancel }: ConfirmDialogProps) {
           <button
             type="button"
             onClick={onCancel}
-            aria-label="Chiudi conferma"
+            aria-label={lang === 'en' ? 'Close confirmation' : 'Chiudi conferma'}
             className="p-1 text-[#5a808a] hover:text-[#0e4d5f]"
           >
             <X className="w-5 h-5" aria-hidden="true" />
@@ -50,7 +52,7 @@ export function ConfirmDialog({ dialog, onCancel }: ConfirmDialogProps) {
             onClick={onCancel}
             className="px-4 py-2 rounded-lg bg-[#eef6f5] hover:bg-[#dceceb] text-[#3b5e68] text-xs font-semibold"
           >
-            Annulla
+            {lang === 'en' ? 'Cancel' : 'Annulla'}
           </button>
           <button
             type="button"

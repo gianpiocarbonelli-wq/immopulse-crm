@@ -2,12 +2,76 @@ export type ClientRole = 'Acquirente' | 'Venditore' | 'Inquilino' | 'Locatore';
 
 export type ClientStatus = 'In corso' | 'Trattativa' | 'Accettato' | 'Perso';
 
-export type PlanTier = 'free' | 'basic' | 'full' | 'agency';
-export type PaidPlanTier = 'basic' | 'full' | 'agency';
+export type PlanTier = 'free' | 'pro' | 'agency';
+export type PaidPlanTier = 'pro' | 'agency';
 
 export type SortOption = 'default' | 'name-asc' | 'price-desc' | 'price-asc' | 'reminder-asc';
 
-export type ActiveTab = 'all' | 'dashboard' | 'reminders' | 'matching';
+export type ActiveTab = 'all' | 'dashboard' | 'reminders' | 'matching' | 'find';
+
+export interface PropertyPortalConfig {
+  id: string;
+  name: string;
+  url: string;
+  enabled: boolean;
+  isCustom?: boolean;
+}
+
+export interface GroundedSource {
+  title: string;
+  uri: string;
+  domain?: string;
+}
+
+export interface ChatbotMessage {
+  id: string;
+  role: 'user' | 'model';
+  text: string;
+  sources?: GroundedSource[];
+  timestamp: string;
+}
+
+export interface PropertyValuationInput {
+  city: string;
+  zone: string;
+  propertyType: string;
+  sqm: number;
+  rooms?: string;
+  condition?: string;
+  floor?: string;
+  notes?: string;
+}
+
+export interface PortalSearchFilters {
+  contract: 'tutti' | 'vendita' | 'affitto';
+  propertyType: string;
+  cityZone: string;
+  minPrice: string;
+  maxPrice: string;
+  minSqm: string;
+  minRooms: string;
+  customFeatures?: string[];
+}
+
+export interface SavedPortalSearch {
+  id: string;
+  name: string;
+  query: string;
+  filters: PortalSearchFilters;
+  createdAt: string;
+}
+
+export interface PortalSearchResultItem {
+  title: string;
+  uri: string;
+  domain: string;
+  portalName?: string;
+}
+
+export interface PortalSearchResponse {
+  summary: string;
+  results: PortalSearchResultItem[];
+}
 
 export type PaymentMethodType = 'digital' | 'card' | 'prepaid';
 
@@ -56,15 +120,33 @@ export interface ClientRecord {
   isFavorite?: boolean;
 }
 
+export type BillingCycle = 'monthly' | 'annual';
+
+export type SubscriptionPhase = 'free' | 'active' | 'expiring_soon' | 'expired';
+
+export interface SubscriptionStatus {
+  phase: SubscriptionPhase;
+  plan: PlanTier;
+  expiresAt: string | null;
+  daysRemaining: number | null;
+  billingCycle: BillingCycle;
+  expiredFromPlan?: PaidPlanTier;
+}
+
 export interface UserAccount {
   name: string;
   email: string;
   password: string;
   plan: PlanTier;
+  billingCycle?: BillingCycle;
   paymentMethod: string;
   activatedAt: string;
+  expiresAt?: string;
+  expiredFromPlan?: PaidPlanTier;
+  expiredAt?: string;
   agencyCode?: string;
   agencyName?: string;
+  licenseCode?: string;
 }
 
 export type AgencyConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';

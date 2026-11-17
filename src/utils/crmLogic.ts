@@ -1,4 +1,5 @@
 import type {
+  BillingCycle,
   ClientFilters,
   ClientInteraction,
   ClientRecord,
@@ -7,10 +8,13 @@ import type {
   CrmMetrics,
   InteractionType,
   MatchResult,
+  PaidPlanTier,
   PlanTier,
+  SubscriptionStatus,
   UpcomingDayBucket,
   UserAccount,
 } from '../types/crm';
+import { type AppLanguage, getLocale, translatePropertyType } from './i18n';
 
 export const MAX_PHOTOS_PER_CLIENT = 7;
 export const MAX_TAGS_PER_CLIENT = 12;
@@ -226,20 +230,21 @@ export function getLatestInteraction(
   return list.length > 0 ? list[0] : null;
 }
 
-export function formatInteractionDate(dateStr: string): string {
-  if (!dateStr) return 'Data non indicata';
+export function formatInteractionDate(dateStr: string, lang: AppLanguage = 'it'): string {
+  if (!dateStr) return lang === 'en' ? 'Date not specified' : 'Data non indicata';
   const parsed = new Date(dateStr);
   if (Number.isNaN(parsed.getTime())) return dateStr;
   const hasTime = dateStr.includes('T');
+  const locale = getLocale(lang);
   return hasTime
-    ? parsed.toLocaleString('it-IT', {
+    ? parsed.toLocaleString(locale, {
         day: 'numeric',
         month: 'short',
         year: 'numeric',
         hour: '2-digit',
         minute: '2-digit',
       })
-    : parsed.toLocaleDateString('it-IT', {
+    : parsed.toLocaleDateString(locale, {
         day: 'numeric',
         month: 'short',
         year: 'numeric',
@@ -296,22 +301,532 @@ export function toggleClientFavorite(pool: ClientRecord[], id: string): ClientRe
   );
 }
 
-export function getActivePlan(user: UserAccount | null): PlanTier {
-  if (!user) return 'free';
-  if (user.plan === 'agency') return 'agency';
-  if (user.plan === 'full') return 'full';
-  if (user.plan === 'basic') return 'basic';
-  return 'free';
+export const SUBSCRIPTION_WARNING_DAYS = 5;
+const DAY_MS = 86_400_000;
+
+export function getBillingCycleDurationDays(cycle: BillingCycle): number {
+  return cycle === 'annual' ? 365 : 30;
+}
+
+export function resolveBillingCycle(plan: PaidPlanTier, requested?: BillingCycle): BillingCycle {
+  if (plan === 'agency') return 'annual';
+  return requested === 'annual' ? 'annual' : 'monthly';
+}
+
+export function computeSubscriptionExpiry(
+  nowMs: number,
+  plan: PaidPlanTier,
+  billingCycle?: BillingCycle,
+  existingExpiresAt?: string,
+): string {
+  const cycle = resolveBillingCycle(plan, billingCycle);
+  const durationMs = getBillingCycleDurationDays(cycle) * DAY_MS;
+  const existingMs = existingExpiresAt ? Date.parse(existingExpiresAt) : NaN;
+  const baseMs = Number.isFinite(existingMs) && existingMs > nowMs ? existingMs : nowMs;
+  return new Date(baseMs + durationMs).toISOString();
+}
+
+export function resolveSubscriptionExpiresMs(user: UserAccount | null): number | null {
+  if (!user) return null;
+  const rawPlan = String((user as { plan?: unknown }).plan ?? '');
+  if (rawPlan !== 'agency' && rawPlan !== 'pro' && rawPlan !== 'full' && rawPlan !== 'basic') {
+    return null;
+  }
+  if (user.expiresAt) {
+    const parsed = Date.parse(user.expiresAt);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  if (user.activatedAt) {
+    const activatedMs = Date.parse(user.activatedAt);
+    if (Number.isFinite(activatedMs)) {
+      const cycle: BillingCycle =
+        rawPlan === 'agency' ? 'annual' : user.billingCycle === 'annual' ? 'annual' : 'monthly';
+      return activatedMs + getBillingCycleDurationDays(cycle) * DAY_MS;
+    }
+  }
+  return null;
+}
+
+export function evaluateSubscriptionStatus(
+  user: UserAccount | null,
+  nowMs: number = Date.now(),
+): SubscriptionStatus {
+  if (!user) {
+    return {
+      phase: 'free',
+      plan: 'free',
+      expiresAt: null,
+      daysRemaining: null,
+      billingCycle: 'monthly',
+    };
+  }
+
+  const rawPlan = String((user as { plan?: unknown }).plan ?? '');
+  const mappedPlan: PlanTier =
+    rawPlan === 'agency'
+      ? 'agency'
+      : rawPlan === 'pro' || rawPlan === 'full' || rawPlan === 'basic'
+        ? 'pro'
+        : 'free';
+
+  if (mappedPlan === 'free') {
+    if (user.expiredFromPlan) {
+      return {
+        phase: 'expired',
+        plan: 'free',
+        expiresAt: user.expiresAt || user.expiredAt || null,
+        daysRemaining: 0,
+        billingCycle: user.billingCycle || (user.expiredFromPlan === 'agency' ? 'annual' : 'monthly'),
+        expiredFromPlan: user.expiredFromPlan,
+      };
+    }
+    return {
+      phase: 'free',
+      plan: 'free',
+      expiresAt: null,
+      daysRemaining: null,
+      billingCycle: 'monthly',
+    };
+  }
+
+  const paidPlan: PaidPlanTier = mappedPlan;
+  const cycle = resolveBillingCycle(paidPlan, user.billingCycle);
+  const expiresMs = resolveSubscriptionExpiresMs(user);
+
+  if (expiresMs === null) {
+    return {
+      phase: 'active',
+      plan: paidPlan,
+      expiresAt: null,
+      daysRemaining: null,
+      billingCycle: cycle,
+    };
+  }
+
+  const remainingMs = expiresMs - nowMs;
+  if (remainingMs <= 0) {
+    return {
+      phase: 'expired',
+      plan: 'free',
+      expiresAt: new Date(expiresMs).toISOString(),
+      daysRemaining: 0,
+      billingCycle: cycle,
+      expiredFromPlan: paidPlan,
+    };
+  }
+
+  const daysRemaining = Math.max(1, Math.ceil(remainingMs / DAY_MS));
+  return {
+    phase: daysRemaining <= SUBSCRIPTION_WARNING_DAYS ? 'expiring_soon' : 'active',
+    plan: paidPlan,
+    expiresAt: new Date(expiresMs).toISOString(),
+    daysRemaining,
+    billingCycle: cycle,
+  };
+}
+
+export function reconcileExpiredSubscription(
+  user: UserAccount,
+  nowMs: number = Date.now(),
+): { user: UserAccount; downgradedFrom: PaidPlanTier | null } {
+  const status = evaluateSubscriptionStatus(user, nowMs);
+  if (
+    status.phase === 'expired' &&
+    status.expiredFromPlan &&
+    (user.plan === 'pro' || user.plan === 'agency' || String(user.plan) === 'full' || String(user.plan) === 'basic')
+  ) {
+    return {
+      user: {
+        ...user,
+        plan: 'free',
+        expiredFromPlan: status.expiredFromPlan,
+        expiredAt: new Date(nowMs).toISOString(),
+      },
+      downgradedFrom: status.expiredFromPlan,
+    };
+  }
+  return { user, downgradedFrom: null };
+}
+
+export type StripeRedirectPlan = 'monthly_1490' | 'annual_99' | 'pro_149';
+
+export const STRIPE_MONTHLY_FALLBACK_EMAIL = 'mensile@immopulse.local';
+export const STRIPE_ANNUAL_FALLBACK_EMAIL = 'annuale@immopulse.local';
+export const STRIPE_PRO_FALLBACK_EMAIL = 'pro@immopulse.local';
+
+export function parsePaidRedirectParam(search: string): StripeRedirectPlan | null {
+  if (!search || typeof search !== 'string') return null;
+  try {
+    const params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
+    const val = params.get('pagato')?.trim().toLowerCase();
+    if (val === 'mensile' || val === 'monthly' || val === 'true') return 'monthly_1490';
+    if (val === 'annuale' || val === 'annual') return 'annual_99';
+    if (val === 'pro') return 'pro_149';
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function hasPaidRedirectParam(search: string): boolean {
+  return parsePaidRedirectParam(search) !== null;
+}
+
+export function hasPaymentSuccessParam(search: string): boolean {
+  if (!search || typeof search !== 'string') return false;
+  try {
+    const params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
+    return params.get('payment')?.trim().toLowerCase() === 'success';
+  } catch {
+    return false;
+  }
+}
+
+export function stripPaidRedirectParam(href: string): string {
+  try {
+    const url = new URL(href, 'https://immopulse.local');
+    url.searchParams.delete('pagato');
+    url.searchParams.delete('payment');
+    const searchStr = url.searchParams.toString();
+    return `${url.pathname}${searchStr ? `?${searchStr}` : ''}${url.hash}`;
+  } catch {
+    return href;
+  }
+}
+
+export const PAYMENT_SUCCESS_FALLBACK_EMAIL = 'pro-stripe@immopulse.local';
+
+export function applyPaymentSuccessActivation(
+  accounts: UserAccount[],
+  sessionEmail: string | null,
+  nowMs: number = Date.now(),
+  activatedAtOverride?: string | null,
+): { accounts: UserAccount[]; activatedUser: UserAccount; sessionEmail: string; activatedAt: string } {
+  const activatedAt =
+    activatedAtOverride && Number.isFinite(Date.parse(activatedAtOverride))
+      ? activatedAtOverride
+      : new Date(nowMs).toISOString();
+  const baseNowMs = Date.parse(activatedAt);
+  const safeBaseMs = Number.isFinite(baseNowMs) ? baseNowMs : nowMs;
+
+  const targetIdx =
+    sessionEmail && sessionEmail.trim()
+      ? accounts.findIndex((a) => a.email === sessionEmail)
+      : accounts.findIndex((a) => a.email === PAYMENT_SUCCESS_FALLBACK_EMAIL);
+
+  if (targetIdx !== -1) {
+    const existing = accounts[targetIdx];
+    const targetPlan: PaidPlanTier = existing.plan === 'agency' ? 'agency' : 'pro';
+    const targetCycle: BillingCycle = existing.billingCycle === 'monthly' ? 'monthly' : 'annual';
+    const activatedUser: UserAccount = {
+      ...existing,
+      plan: targetPlan,
+      billingCycle: targetCycle,
+      paymentMethod: 'Stripe',
+      activatedAt,
+      expiresAt: computeSubscriptionExpiry(safeBaseMs, targetPlan, targetCycle),
+      expiredFromPlan: undefined,
+      expiredAt: undefined,
+    };
+    const nextAccounts = accounts.map((a, i) => (i === targetIdx ? activatedUser : a));
+    return {
+      accounts: nextAccounts,
+      activatedUser,
+      sessionEmail: activatedUser.email,
+      activatedAt,
+    };
+  }
+
+  const resolvedEmail =
+    sessionEmail && sessionEmail.trim() ? sessionEmail.trim() : PAYMENT_SUCCESS_FALLBACK_EMAIL;
+  const createdUser: UserAccount = {
+    name: 'ImmoPulse Pro',
+    email: resolvedEmail,
+    password: '',
+    plan: 'pro',
+    billingCycle: 'annual',
+    paymentMethod: 'Stripe',
+    activatedAt,
+    expiresAt: computeSubscriptionExpiry(safeBaseMs, 'pro', 'annual'),
+  };
+  return {
+    accounts: [...accounts, createdUser],
+    activatedUser: createdUser,
+    sessionEmail: createdUser.email,
+    activatedAt,
+  };
+}
+
+export function applyStripePlanActivation(
+  accounts: UserAccount[],
+  sessionEmail: string | null,
+  redirectPlan: StripeRedirectPlan,
+  nowMs: number = Date.now(),
+): { accounts: UserAccount[]; activatedUser: UserAccount; sessionEmail: string } {
+  const nowIso = new Date(nowMs).toISOString();
+  const targetPlan: PaidPlanTier = redirectPlan === 'pro_149' ? 'agency' : 'pro';
+  const targetCycle: BillingCycle = redirectPlan === 'monthly_1490' ? 'monthly' : 'annual';
+  const defaultFallbackEmail =
+    redirectPlan === 'pro_149'
+      ? STRIPE_PRO_FALLBACK_EMAIL
+      : redirectPlan === 'annual_99'
+        ? STRIPE_ANNUAL_FALLBACK_EMAIL
+        : STRIPE_MONTHLY_FALLBACK_EMAIL;
+  const defaultFallbackName =
+    redirectPlan === 'pro_149'
+      ? 'Licenza Pro'
+      : redirectPlan === 'annual_99'
+        ? 'Abbonamento Annuale'
+        : 'Abbonamento Mensile';
+
+  const targetIdx =
+    sessionEmail && sessionEmail.trim()
+      ? accounts.findIndex((a) => a.email === sessionEmail)
+      : accounts.findIndex((a) => a.email === defaultFallbackEmail);
+
+  if (targetIdx !== -1) {
+    const existing = accounts[targetIdx];
+    const recentActivationMs = existing.activatedAt ? Date.parse(existing.activatedAt) : NaN;
+    if (
+      existing.plan === targetPlan &&
+      existing.billingCycle === targetCycle &&
+      existing.paymentMethod === 'Stripe' &&
+      Number.isFinite(recentActivationMs) &&
+      Math.abs(nowMs - recentActivationMs) < 60_000
+    ) {
+      return { accounts, activatedUser: existing, sessionEmail: existing.email };
+    }
+
+    const baseExpiry =
+      existing.plan === targetPlan && existing.billingCycle === targetCycle
+        ? existing.expiresAt
+        : undefined;
+    const activatedUser: UserAccount = {
+      ...existing,
+      plan: targetPlan,
+      billingCycle: targetCycle,
+      paymentMethod: 'Stripe',
+      activatedAt: nowIso,
+      expiresAt: computeSubscriptionExpiry(nowMs, targetPlan, targetCycle, baseExpiry),
+      expiredFromPlan: undefined,
+      expiredAt: undefined,
+    };
+    const nextAccounts = accounts.map((a, i) => (i === targetIdx ? activatedUser : a));
+    return { accounts: nextAccounts, activatedUser, sessionEmail: activatedUser.email };
+  }
+
+  const resolvedEmail = sessionEmail && sessionEmail.trim() ? sessionEmail.trim() : defaultFallbackEmail;
+  const createdUser: UserAccount = {
+    name: defaultFallbackName,
+    email: resolvedEmail,
+    password: '',
+    plan: targetPlan,
+    billingCycle: targetCycle,
+    paymentMethod: 'Stripe',
+    activatedAt: nowIso,
+    expiresAt: computeSubscriptionExpiry(nowMs, targetPlan, targetCycle),
+  };
+  return {
+    accounts: [...accounts, createdUser],
+    activatedUser: createdUser,
+    sessionEmail: createdUser.email,
+  };
+}
+
+export function applyStripeProActivation(
+  accounts: UserAccount[],
+  sessionEmail: string | null,
+  nowMs: number = Date.now(),
+): { accounts: UserAccount[]; activatedUser: UserAccount; sessionEmail: string } {
+  return applyStripePlanActivation(accounts, sessionEmail, 'monthly_1490', nowMs);
+}
+
+export const LICENSE_FALLBACK_EMAIL = 'licenza@immopulse.local';
+
+export type LicenseValidationResult =
+  | {
+      valid: true;
+      normalizedCode: string;
+      plan: PaidPlanTier;
+      billingCycle: BillingCycle;
+    }
+  | {
+      valid: false;
+      error: string;
+    };
+
+export function validateLicenseCode(
+  rawCode: string,
+  lang: AppLanguage = 'it',
+): LicenseValidationResult {
+  const normalized = String(rawCode ?? '').trim().toUpperCase();
+  if (!normalized) {
+    return {
+      valid: false,
+      error:
+        lang === 'en'
+          ? 'Enter a license code to verify.'
+          : 'Inserisci un codice licenza da verificare.',
+    };
+  }
+
+  if (/\s/.test(normalized) || normalized.length < 6 || normalized.length > 48) {
+    return {
+      valid: false,
+      error:
+        lang === 'en'
+          ? 'Invalid license code. Use a valid format (e.g. IMMOPULSE2026 or IMMO-PRO-2026).'
+          : 'Codice licenza non valido. Inserisci un formato valido (es. IMMOPULSE2026 o IMMO-PRO-2026).',
+    };
+  }
+
+  const isKnownPrefix = /^(IMMOPULSE|IMMO|IMP|PRO|AGENTE|AGENZIA|TEAM|LIC)[A-Z0-9-]{2,}$/.test(
+    normalized,
+  );
+  const isSegmentedKey = /^[A-Z0-9]{4,6}(-[A-Z0-9]{4,6}){1,3}$/.test(normalized);
+
+  if (!isKnownPrefix && !isSegmentedKey) {
+    return {
+      valid: false,
+      error:
+        lang === 'en'
+          ? 'Unrecognized license code. Check the code received after purchase (e.g. IMMOPULSE2026).'
+          : 'Codice licenza non riconosciuto. Controlla il codice ricevuto dopo l’acquisto (es. IMMOPULSE2026).',
+    };
+  }
+
+  const isAgencyKey =
+    normalized.includes('AGENZIA') ||
+    normalized.includes('AGENCY') ||
+    normalized.includes('TEAM');
+
+  return {
+    valid: true,
+    normalizedCode: normalized,
+    plan: isAgencyKey ? 'agency' : 'pro',
+    billingCycle: 'annual',
+  };
+}
+
+export type LicenseActivationResult =
+  | {
+      ok: true;
+      accounts: UserAccount[];
+      activatedUser: UserAccount;
+      sessionEmail: string;
+      normalizedCode: string;
+      plan: PaidPlanTier;
+      billingCycle: BillingCycle;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
+export function applyLicenseCodeActivation(
+  accounts: UserAccount[],
+  sessionEmail: string | null,
+  rawCode: string,
+  nowMs: number = Date.now(),
+  lang: AppLanguage = 'it',
+): LicenseActivationResult {
+  const checked = validateLicenseCode(rawCode, lang);
+  if (!checked.valid) {
+    return { ok: false, error: checked.error };
+  }
+
+  const nowIso = new Date(nowMs).toISOString();
+  const targetPlan = checked.plan;
+  const targetCycle = checked.billingCycle;
+
+  const targetIdx =
+    sessionEmail && sessionEmail.trim()
+      ? accounts.findIndex((a) => a.email === sessionEmail)
+      : accounts.findIndex((a) => a.email === LICENSE_FALLBACK_EMAIL);
+
+  if (targetIdx !== -1) {
+    const existing = accounts[targetIdx];
+    const activatedUser: UserAccount = {
+      ...existing,
+      plan: targetPlan,
+      billingCycle: targetCycle,
+      paymentMethod: `Licenza (${checked.normalizedCode})`,
+      licenseCode: checked.normalizedCode,
+      activatedAt: nowIso,
+      expiresAt: computeSubscriptionExpiry(nowMs, targetPlan, targetCycle),
+      expiredFromPlan: undefined,
+      expiredAt: undefined,
+    };
+    const nextAccounts = accounts.map((a, i) => (i === targetIdx ? activatedUser : a));
+    return {
+      ok: true,
+      accounts: nextAccounts,
+      activatedUser,
+      sessionEmail: activatedUser.email,
+      normalizedCode: checked.normalizedCode,
+      plan: targetPlan,
+      billingCycle: targetCycle,
+    };
+  }
+
+  const resolvedEmail =
+    sessionEmail && sessionEmail.trim() ? sessionEmail.trim() : LICENSE_FALLBACK_EMAIL;
+  const defaultName =
+    targetPlan === 'agency'
+      ? lang === 'en'
+        ? 'Agency Pro License'
+        : 'Licenza Agenzia Pro'
+      : lang === 'en'
+        ? 'Agent Pro License'
+        : 'Licenza Agente Pro';
+
+  const createdUser: UserAccount = {
+    name: defaultName,
+    email: resolvedEmail,
+    password: '',
+    plan: targetPlan,
+    billingCycle: targetCycle,
+    paymentMethod: `Licenza (${checked.normalizedCode})`,
+    licenseCode: checked.normalizedCode,
+    activatedAt: nowIso,
+    expiresAt: computeSubscriptionExpiry(nowMs, targetPlan, targetCycle),
+  };
+
+  return {
+    ok: true,
+    accounts: [...accounts, createdUser],
+    activatedUser: createdUser,
+    sessionEmail: createdUser.email,
+    normalizedCode: checked.normalizedCode,
+    plan: targetPlan,
+    billingCycle: targetCycle,
+  };
+}
+
+export function getSubscriptionPlanLabel(
+  plan: PaidPlanTier,
+  billingCycle?: BillingCycle,
+  lang: AppLanguage = 'it',
+): string {
+  if (lang === 'en') {
+    if (plan === 'agency') return 'Agency / Team (Annual)';
+    return billingCycle === 'annual' ? 'Individual Pro (Annual)' : 'Individual Pro (Monthly)';
+  }
+  if (plan === 'agency') return 'Agenzia / Team (Annuale)';
+  return billingCycle === 'annual' ? 'Singolo Pro (Annuale)' : 'Singolo Pro (Mensile)';
+}
+
+export function getActivePlan(user: UserAccount | null, nowMs: number = Date.now()): PlanTier {
+  return evaluateSubscriptionStatus(user, nowMs).plan;
 }
 
 export function getClientLimit(plan: PlanTier): number {
-  if (plan === 'agency' || plan === 'full') return Infinity;
-  if (plan === 'basic') return 10;
+  if (plan === 'pro' || plan === 'agency') return Infinity;
   return 3;
 }
 
 export function canUseWhatsAppAndMap(plan: PlanTier): boolean {
-  return plan === 'basic' || plan === 'full' || plan === 'agency';
+  return plan === 'pro' || plan === 'agency';
 }
 
 export function canUseAgencySync(plan: PlanTier): boolean {
@@ -584,12 +1099,17 @@ export function filterAndSortClients(pool: ClientRecord[], filters: ClientFilter
   return filtered;
 }
 
-export function computeMatches(pool: ClientRecord[], propertyId: string): MatchResult[] {
+export function computeMatches(
+  pool: ClientRecord[],
+  propertyId: string,
+  lang: AppLanguage = 'it',
+): MatchResult[] {
   const property = pool.find((c) => String(c.id) === String(propertyId));
   if (!property) return [];
 
   const targetBuyerRole: ClientRole = property.role === 'Locatore' ? 'Inquilino' : 'Acquirente';
   const buyers = pool.filter((c) => c.role === targetBuyerRole && c.status !== 'Perso');
+  const locale = getLocale(lang);
 
   return buyers
     .map((buyer) => {
@@ -598,14 +1118,23 @@ export function computeMatches(pool: ClientRecord[], propertyId: string): MatchR
 
       if (buyer.propertyType && property.propertyType && buyer.propertyType === property.propertyType) {
         score += 40;
-        reasons.push(`Tipologia coincidente (${property.propertyType})`);
+        const typeLabel = translatePropertyType(property.propertyType, lang);
+        reasons.push(
+          lang === 'en'
+            ? `Matching property type (${typeLabel})`
+            : `Tipologia coincidente (${property.propertyType})`,
+        );
       }
 
       const bZone = (buyer.zone || '').trim().toLowerCase();
       const pZone = (property.zone || '').trim().toLowerCase();
       if (bZone && pZone && (bZone.includes(pZone) || pZone.includes(bZone))) {
         score += 40;
-        reasons.push(`Zona compatibile (${property.zone})`);
+        reasons.push(
+          lang === 'en'
+            ? `Compatible area (${property.zone})`
+            : `Zona compatibile (${property.zone})`,
+        );
       }
 
       const bPrice = Number(buyer.price) || 0;
@@ -613,7 +1142,9 @@ export function computeMatches(pool: ClientRecord[], propertyId: string): MatchR
       if (bPrice > 0 && pPrice > 0 && bPrice >= pPrice) {
         score += 20;
         reasons.push(
-          `Budget adeguato (€ ${bPrice.toLocaleString('it-IT')} >= € ${pPrice.toLocaleString('it-IT')})`,
+          lang === 'en'
+            ? `Sufficient budget (€ ${bPrice.toLocaleString(locale)} >= € ${pPrice.toLocaleString(locale)})`
+            : `Budget adeguato (€ ${bPrice.toLocaleString('it-IT')} >= € ${pPrice.toLocaleString('it-IT')})`,
         );
       }
 
@@ -628,6 +1159,7 @@ export function buildWhatsAppUrl(
   name: string,
   zone?: string,
   propertyType?: string,
+  lang: AppLanguage = 'it',
 ): string {
   let cleanPhone = String(phone || '').replace(/[^0-9]/g, '');
   if (cleanPhone.startsWith('00')) {
@@ -636,11 +1168,22 @@ export function buildWhatsAppUrl(
   const formattedPhone =
     cleanPhone.length === 10 && cleanPhone.startsWith('3') ? `39${cleanPhone}` : cleanPhone;
 
-  let msg = `Buongiorno ${name}, sono il suo agente immobiliare. `;
-  if (zone && propertyType) {
-    msg += `Ho una novità immobiliare relativa ad un ${propertyType} in zona ${zone} che potrebbe interessarle molto! Quando possiamo sentirci?`;
+  let msg = '';
+  if (lang === 'en') {
+    const typeLabel = propertyType ? translatePropertyType(propertyType, 'en') : '';
+    msg = `Hello ${name}, I'm your real estate agent. `;
+    if (zone && typeLabel) {
+      msg += `I have an exciting property update regarding a ${typeLabel} in ${zone} that might interest you! When can we talk?`;
+    } else {
+      msg += `I'm writing regarding your property requirements. I have some great updates!`;
+    }
   } else {
-    msg += `Le scrivo in merito alle sue esigenze immobiliari. Ci sono novità interessanti!`;
+    msg = `Buongiorno ${name}, sono il suo agente immobiliare. `;
+    if (zone && propertyType) {
+      msg += `Ho una novità immobiliare relativa ad un ${propertyType} in zona ${zone} che potrebbe interessarle molto! Quando possiamo sentirci?`;
+    } else {
+      msg += `Le scrivo in merito alle sue esigenze immobiliari. Ci sono novità interessanti!`;
+    }
   }
 
   return `https://wa.me/${formattedPhone}?text=${encodeURIComponent(msg)}`;
@@ -652,20 +1195,26 @@ export function buildMapsUrl(address?: string, zone?: string): string | null {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapQuery)}`;
 }
 
-export function formatCurrencyEUR(price: number | undefined): string {
-  if (!price || price <= 0) return 'N/D';
-  return new Intl.NumberFormat('it-IT', {
+export function formatCurrencyEUR(price: number | undefined, lang: AppLanguage = 'it'): string {
+  if (!price || price <= 0) return lang === 'en' ? 'N/A' : 'N/D';
+  return new Intl.NumberFormat(getLocale(lang), {
     style: 'currency',
     currency: 'EUR',
     maximumFractionDigits: 0,
   }).format(price);
 }
 
-export function generateCsvContent(pool: ClientRecord[]): string {
-  const headers = [
-    'Nome', 'Telefono', 'Email', 'Ruolo', 'Tipologia', 'Zona', 'Indirizzo',
-    'Prezzo', 'Mq', 'Vani', 'Piano', 'SpeseCond', 'Esito', 'Promemoria', 'Etichette', 'Note',
-  ];
+export function generateCsvContent(pool: ClientRecord[], lang: AppLanguage = 'it'): string {
+  const headers =
+    lang === 'en'
+      ? [
+          'Name', 'Phone', 'Email', 'Role', 'Property Type', 'Area', 'Address',
+          'Price', 'Sqm', 'Rooms', 'Floor', 'Condo Fees', 'Status', 'Reminder', 'Tags', 'Notes',
+        ]
+      : [
+          'Nome', 'Telefono', 'Email', 'Ruolo', 'Tipologia', 'Zona', 'Indirizzo',
+          'Prezzo', 'Mq', 'Vani', 'Piano', 'SpeseCond', 'Esito', 'Promemoria', 'Etichette', 'Note',
+        ];
   const cell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
   const rows = pool.map((c) =>
     [
@@ -677,17 +1226,25 @@ export function generateCsvContent(pool: ClientRecord[]): string {
   return '\uFEFF' + [headers.map(cell).join(';'), ...rows.map((row) => row.join(';'))].join('\r\n');
 }
 
-export function validateDigitalPayment(provider: string, accountVal: string): string | null {
+export function validateDigitalPayment(
+  provider: string,
+  accountVal: string,
+  lang: AppLanguage = 'it',
+): string | null {
   const trimmed = accountVal.trim();
   if (provider === 'PayPal') {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
-      return 'Inserisci un indirizzo email PayPal valido.';
+      return lang === 'en'
+        ? 'Enter a valid PayPal email address.'
+        : 'Inserisci un indirizzo email PayPal valido.';
     }
     return null;
   }
   const digits = trimmed.replace(/\D/g, '');
   if (digits.length < 8 || digits.length > 15) {
-    return `Inserisci un numero di cellulare valido per ${provider}.`;
+    return lang === 'en'
+      ? `Enter a valid mobile number for ${provider}.`
+      : `Inserisci un numero di cellulare valido per ${provider}.`;
   }
   return null;
 }
@@ -698,6 +1255,7 @@ export function validateCardPayment(
   expiryRaw: string,
   cvvRaw: string,
   now: Date = new Date(),
+  lang: AppLanguage = 'it',
 ): string | null {
   const cardNum = cardNumberRaw.replace(/\s+/g, '');
   const expiry = expiryRaw.trim();
@@ -709,13 +1267,17 @@ export function validateCardPayment(
     !/^(0[1-9]|1[0-2])\/\d{2}$/.test(expiry) ||
     !/^\d{3,4}$/.test(cvv)
   ) {
-    return 'Inserisci dati carta validi (intestatario, numero 13-19 cifre, scadenza MM/AA e CVV).';
+    return lang === 'en'
+      ? 'Enter valid card details (cardholder name, 13-19 digit number, MM/YY expiry and CVV).'
+      : 'Inserisci dati carta validi (intestatario, numero 13-19 cifre, scadenza MM/AA e CVV).';
   }
 
   const [mm, yy] = expiry.split('/').map(Number);
   const expDate = new Date(2000 + yy, mm, 0, 23, 59, 59);
   if (expDate < now) {
-    return 'La carta inserita risulta scaduta. Inserisci una data valida.';
+    return lang === 'en'
+      ? 'The entered card appears expired. Please enter a valid expiration date.'
+      : 'La carta inserita risulta scaduta. Inserisci una data valida.';
   }
 
   return null;
@@ -731,6 +1293,7 @@ export function toLocalDateKey(date: Date): string {
 export function buildUpcoming7DaysBuckets(
   pool: ClientRecord[],
   referenceNow: Date = new Date(),
+  lang: AppLanguage = 'it',
 ): UpcomingDayBucket[] {
   const startOfToday = new Date(
     referenceNow.getFullYear(),
@@ -740,6 +1303,8 @@ export function buildUpcoming7DaysBuckets(
 
   const buckets: UpcomingDayBucket[] = [];
   const bucketMap = new Map<string, UpcomingDayBucket>();
+  const locale = getLocale(lang);
+  const todayWord = lang === 'en' ? 'Today' : 'Oggi';
 
   for (let offset = 0; offset < 7; offset++) {
     const dayDate = new Date(
@@ -749,21 +1314,21 @@ export function buildUpcoming7DaysBuckets(
     );
     const dateKey = toLocalDateKey(dayDate);
 
-    const weekdayShort = dayDate.toLocaleDateString('it-IT', { weekday: 'short' });
+    const weekdayShort = dayDate.toLocaleDateString(locale, { weekday: 'short' });
     const dayNum = dayDate.getDate();
     const shortLabel =
       offset === 0
-        ? `Oggi (${dayNum})`
+        ? `${todayWord} (${dayNum})`
         : `${weekdayShort.charAt(0).toUpperCase()}${weekdayShort.slice(1).replace('.', '')} ${dayNum}`;
 
-    const fullFormatted = dayDate.toLocaleDateString('it-IT', {
+    const fullFormatted = dayDate.toLocaleDateString(locale, {
       weekday: 'long',
       day: 'numeric',
       month: 'long',
     });
     const fullLabel =
       offset === 0
-        ? `Oggi, ${fullFormatted}`
+        ? `${todayWord}, ${fullFormatted}`
         : `${fullFormatted.charAt(0).toUpperCase()}${fullFormatted.slice(1)}`;
 
     const bucket: UpcomingDayBucket = {

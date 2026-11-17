@@ -12,6 +12,7 @@ import {
   WifiOff,
   X,
 } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 import type {
   AgencyActivityEvent,
   AgencyConnectionStatus,
@@ -56,6 +57,7 @@ export function AgencySyncModal({
   onOpenAgencyPlanUpgrade,
   onNotify,
 }: AgencySyncModalProps) {
+  const { lang, locale } = useLanguage();
   const [agencyNameInput, setAgencyNameInput] = useState('');
   const [agencyCodeInput, setAgencyCodeInput] = useState('');
   const [agentNameInput, setAgentNameInput] = useState('');
@@ -77,7 +79,9 @@ export function AgencySyncModal({
   const normalizedInputCode = normalizeAgencyCode(agencyCodeInput);
 
   const handleGenerateCode = () => {
-    const code = generateAgencyCode(agencyNameInput || agentNameInput || 'AGENZIA');
+    const code = generateAgencyCode(
+      agencyNameInput || agentNameInput || (lang === 'en' ? 'AGENCY' : 'AGENZIA'),
+    );
     setAgencyCodeInput(code);
   };
 
@@ -87,10 +91,19 @@ export function AgencySyncModal({
     try {
       await navigator.clipboard.writeText(codeToCopy);
       setCopiedCode(true);
-      onNotify(`Codice agenzia "${codeToCopy}" copiato negli appunti.`);
+      onNotify(
+        lang === 'en'
+          ? `Agency code "${codeToCopy}" copied to clipboard.`
+          : `Codice agenzia "${codeToCopy}" copiato negli appunti.`,
+      );
       window.setTimeout(() => setCopiedCode(false), 2000);
     } catch {
-      onNotify('Copia manuale: seleziona il codice agenzia mostrato.', 'info');
+      onNotify(
+        lang === 'en'
+          ? 'Manual copy: select the displayed agency code.'
+          : 'Copia manuale: seleziona il codice agenzia mostrato.',
+        'info',
+      );
     }
   };
 
@@ -98,13 +111,19 @@ export function AgencySyncModal({
     e.preventDefault();
     const cleanCode = normalizeAgencyCode(agencyCodeInput);
     if (!cleanCode) {
-      onNotify('Inserisci o genera un Codice Agenzia valido (es. ROSSI-2026).', 'error');
+      onNotify(
+        lang === 'en'
+          ? 'Enter or generate a valid Agency Code (e.g. ROSSI-2026).'
+          : 'Inserisci o genera un Codice Agenzia valido (es. ROSSI-2026).',
+        'error',
+      );
       return;
     }
     const config: AgencyWorkspaceConfig = {
       agencyCode: cleanCode,
       agencyName: agencyNameInput.trim(),
-      agentName: agentNameInput.trim() || defaultAgentName || 'Agente',
+      agentName:
+        agentNameInput.trim() || defaultAgentName || (lang === 'en' ? 'Agent' : 'Agente'),
       deviceLabel: deviceLabelInput.trim() || detectDeviceLabel(),
     };
     onConnectWorkspace(config);
@@ -117,7 +136,7 @@ export function AgencySyncModal({
         className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#e6f7f1] text-[#177858] border border-[#2eb086]/40 text-xs font-semibold"
       >
         <Wifi className="w-3.5 h-3.5" aria-hidden="true" />
-        Connesso live ({members.length})
+        {lang === 'en' ? `Connected live (${members.length})` : `Connesso live (${members.length})`}
       </span>
     ) : status === 'connecting' ? (
       <span
@@ -125,7 +144,7 @@ export function AgencySyncModal({
         className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 text-xs font-semibold"
       >
         <RefreshCw className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
-        Connessione in corso...
+        {lang === 'en' ? 'Connecting...' : 'Connessione in corso...'}
       </span>
     ) : (
       <span
@@ -133,7 +152,7 @@ export function AgencySyncModal({
         className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold"
       >
         <WifiOff className="w-3.5 h-3.5" aria-hidden="true" />
-        Non collegato
+        {lang === 'en' ? 'Not connected' : 'Non collegato'}
       </span>
     );
 
@@ -145,9 +164,9 @@ export function AgencySyncModal({
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      className="fixed inset-0 z-50 bg-[#092b35]/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-[#092b35]/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto animate-backdrop"
     >
-      <div className="bg-white border border-[#cbe2de] w-full max-w-2xl rounded-2xl overflow-hidden shadow-2xl my-auto flex flex-col max-h-[92vh]">
+      <div className="bg-white border border-[#cbe2de] w-full max-w-2xl rounded-t-3xl sm:rounded-2xl overflow-hidden shadow-2xl sm:my-auto flex flex-col max-h-[92vh] animate-bottom-sheet">
         <div className="px-6 py-4 border-b border-[#e1f0ed] flex items-center justify-between bg-[#f4faf9] sticky top-0 z-10">
           <div className="flex items-center gap-2.5 flex-wrap">
             <h2
@@ -155,14 +174,16 @@ export function AgencySyncModal({
               className="font-bold text-base text-[#0e4d5f] flex items-center gap-2"
             >
               <Building2 className="w-5 h-5 text-[#0e4d5f]" aria-hidden="true" />
-              Team Agenzia Multi-Dispositivo
+              {lang === 'en'
+                ? 'Multi-Device Agency Team'
+                : 'Team Agenzia Multi-Dispositivo'}
             </h2>
             {isAgencyPlan && statusBadge}
           </div>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Chiudi finestra team agenzia"
+            aria-label={lang === 'en' ? 'Close agency team modal' : 'Chiudi finestra team agenzia'}
             className="p-1.5 rounded-lg text-[#5a808a] hover:text-[#0e4d5f]"
           >
             <X className="w-5 h-5" aria-hidden="true" />
@@ -176,13 +197,26 @@ export function AgencySyncModal({
                 <Crown className="w-6 h-6 text-amber-500 shrink-0 mt-0.5" aria-hidden="true" />
                 <div className="space-y-1.5">
                   <h3 className="font-bold text-[#0e4d5f] text-base">
-                    Collega tutta l&apos;agenzia in tempo reale — € 59,00 / anno
+                    {lang === 'en'
+                      ? 'Connect your whole agency in real time — 149,00 € / year'
+                      : "Collega tutta l'agenzia in tempo reale — € 149,00 / anno"}
                   </h3>
                   <p className="text-xs text-[#3b5e68] leading-relaxed">
-                    Con il <strong>Piano Azienda Multi-Dispositivo (€ 59,00 / anno)</strong> tutti i
-                    dispositivi (PC in ufficio, smartphone e tablet degli agenti) si sincronizzano
-                    all&apos;istante tramite lo stesso <strong>Codice Agenzia</strong>: nuovi clienti,
-                    modifiche, preferiti e richiami si aggiornano live senza ricaricare la pagina.
+                    {lang === 'en' ? (
+                      <>
+                        With the <strong>Agency / Multi-Device Team Plan (149,00 € / year)</strong> all
+                        devices (office PCs, agent smartphones and tablets) sync instantly using the
+                        same <strong>Agency Code</strong>: new clients, edits, favorites, and reminders
+                        update live without refreshing the page.
+                      </>
+                    ) : (
+                      <>
+                        Con il <strong>Piano Agenzia / Team Multi-Dispositivo (€ 149,00 / anno)</strong> tutti i
+                        dispositivi (PC in ufficio, smartphone e tablet degli agenti) si sincronizzano
+                        all&apos;istante tramite lo stesso <strong>Codice Agenzia</strong>: nuovi clienti,
+                        modifiche, preferiti e richiami si aggiornano live senza ricaricare la pagina.
+                      </>
+                    )}
                   </p>
                 </div>
               </div>
@@ -192,7 +226,7 @@ export function AgencySyncModal({
                   onClick={onClose}
                   className="px-4 py-2 rounded-lg bg-white border border-[#cbe2de] text-[#3b5e68] text-xs font-semibold"
                 >
-                  Chiudi
+                  {lang === 'en' ? 'Close' : 'Chiudi'}
                 </button>
                 <button
                   type="button"
@@ -202,7 +236,9 @@ export function AgencySyncModal({
                   }}
                   className="px-4 py-2 rounded-lg bg-[#0e4d5f] hover:bg-[#0a3c4a] text-white text-xs font-semibold"
                 >
-                  Attiva Piano Azienda (€ 59/anno)
+                  {lang === 'en'
+                    ? 'Activate Agency Plan (149,00 €/year)'
+                    : 'Attiva Piano Agenzia (€ 149/anno)'}
                 </button>
               </div>
             </div>
@@ -215,11 +251,14 @@ export function AgencySyncModal({
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <div className="text-xs font-bold text-[#0e4d5f]">
-                      Configurazione Stanza Agenzia (€ 59,00 / anno attivo)
+                      {lang === 'en'
+                        ? 'Agency Room Setup (149,00 € / year active)'
+                        : 'Configurazione Stanza Agenzia (€ 149,00 / anno attivo)'}
                     </div>
                     <p className="text-xs text-[#4a707a]">
-                      Inserisci lo stesso Codice Agenzia su tutti i dispositivi per sincronizzare
-                      schede clienti, preferiti e agenda in tempo reale.
+                      {lang === 'en'
+                        ? 'Enter the same Agency Code on every device to sync client cards, favorites, and schedule in real time.'
+                        : 'Inserisci lo stesso Codice Agenzia su tutti i dispositivi per sincronizzare schede clienti, preferiti e agenda in tempo reale.'}
                     </p>
                   </div>
                 </div>
@@ -227,7 +266,7 @@ export function AgencySyncModal({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label htmlFor="agency-name-input" className="block text-xs text-[#3b5e68] mb-1">
-                      Nome Agenzia
+                      {lang === 'en' ? 'Agency Name' : 'Nome Agenzia'}
                     </label>
                     <input
                       id="agency-name-input"
@@ -235,14 +274,18 @@ export function AgencySyncModal({
                       type="text"
                       value={agencyNameInput}
                       onChange={(e) => setAgencyNameInput(e.target.value)}
-                      placeholder="Es. Immobiliare Rossi Milano"
+                      placeholder={
+                        lang === 'en'
+                          ? 'e.g. Rossi Real Estate Milan'
+                          : 'Es. Immobiliare Rossi Milano'
+                      }
                       className="w-full bg-white border border-[#cbe2de] rounded-lg px-3 py-2 text-[#0f3b47] focus:outline-none focus:border-[#2eb086]"
                     />
                   </div>
 
                   <div>
                     <label htmlFor="agency-code-input" className="block text-xs text-[#3b5e68] mb-1">
-                      Codice Agenzia Condiviso *
+                      {lang === 'en' ? 'Shared Agency Code *' : 'Codice Agenzia Condiviso *'}
                     </label>
                     <div className="flex gap-1.5">
                       <input
@@ -252,23 +295,25 @@ export function AgencySyncModal({
                         required
                         value={agencyCodeInput}
                         onChange={(e) => setAgencyCodeInput(e.target.value.toUpperCase())}
-                        placeholder="Es. ROSSI-2026"
+                        placeholder={lang === 'en' ? 'e.g. ROSSI-2026' : 'Es. ROSSI-2026'}
                         className="w-full bg-white border border-[#cbe2de] rounded-lg px-3 py-2 text-[#0f3b47] font-mono uppercase tracking-wider focus:outline-none focus:border-[#2eb086]"
                       />
                       <button
                         type="button"
                         onClick={handleGenerateCode}
-                        title="Genera nuovo codice agenzia"
+                        title={
+                          lang === 'en' ? 'Generate new agency code' : 'Genera nuovo codice agenzia'
+                        }
                         className="px-2.5 py-2 rounded-lg bg-[#eef6f5] hover:bg-[#dceceb] text-[#0e4d5f] border border-[#cbe2de] text-xs font-semibold whitespace-nowrap shrink-0"
                       >
-                        Genera
+                        {lang === 'en' ? 'Generate' : 'Genera'}
                       </button>
                       {(activeAgencyCode || normalizedInputCode) && (
                         <button
                           type="button"
                           onClick={handleCopyCode}
-                          aria-label="Copia codice agenzia"
-                          title="Copia codice agenzia"
+                          aria-label={lang === 'en' ? 'Copy agency code' : 'Copia codice agenzia'}
+                          title={lang === 'en' ? 'Copy agency code' : 'Copia codice agenzia'}
                           className="px-2.5 py-2 rounded-lg bg-white hover:bg-[#eef6f5] text-[#0e4d5f] border border-[#cbe2de] text-xs font-semibold shrink-0 inline-flex items-center"
                         >
                           {copiedCode ? (
@@ -283,7 +328,7 @@ export function AgencySyncModal({
 
                   <div>
                     <label htmlFor="agency-agent-input" className="block text-xs text-[#3b5e68] mb-1">
-                      Nome Agente *
+                      {lang === 'en' ? 'Agent Name *' : 'Nome Agente *'}
                     </label>
                     <input
                       id="agency-agent-input"
@@ -292,14 +337,14 @@ export function AgencySyncModal({
                       required
                       value={agentNameInput}
                       onChange={(e) => setAgentNameInput(e.target.value)}
-                      placeholder="Es. Marco Rossi"
+                      placeholder={lang === 'en' ? 'e.g. Marco Rossi' : 'Es. Marco Rossi'}
                       className="w-full bg-white border border-[#cbe2de] rounded-lg px-3 py-2 text-[#0f3b47] focus:outline-none focus:border-[#2eb086]"
                     />
                   </div>
 
                   <div>
                     <label htmlFor="agency-device-input" className="block text-xs text-[#3b5e68] mb-1">
-                      Etichetta Dispositivo
+                      {lang === 'en' ? 'Device Label' : 'Etichetta Dispositivo'}
                     </label>
                     <input
                       id="agency-device-input"
@@ -307,7 +352,11 @@ export function AgencySyncModal({
                       type="text"
                       value={deviceLabelInput}
                       onChange={(e) => setDeviceLabelInput(e.target.value)}
-                      placeholder="Es. iPhone Marco / PC Ufficio"
+                      placeholder={
+                        lang === 'en'
+                          ? 'e.g. Marco iPhone / Office PC'
+                          : 'Es. iPhone Marco / PC Ufficio'
+                      }
                       className="w-full bg-white border border-[#cbe2de] rounded-lg px-3 py-2 text-[#0f3b47] focus:outline-none focus:border-[#2eb086]"
                     />
                   </div>
@@ -322,11 +371,13 @@ export function AgencySyncModal({
                       className="px-3.5 py-2 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold inline-flex items-center gap-1.5"
                     >
                       <Unplug className="w-3.5 h-3.5" aria-hidden="true" />
-                      Disconnetti dispositivo
+                      {lang === 'en' ? 'Disconnect device' : 'Disconnetti dispositivo'}
                     </button>
                   ) : (
                     <span className="text-[11px] text-[#5a808a]">
-                      I dati correnti verranno uniti alla stanza se la stanza è nuova.
+                      {lang === 'en'
+                        ? 'Current records will be merged if the room is new.'
+                        : 'I dati correnti verranno uniti alla stanza se la stanza è nuova.'}
                     </span>
                   )}
                   <button
@@ -335,7 +386,13 @@ export function AgencySyncModal({
                     className="px-4 py-2 rounded-lg bg-[#0e4d5f] hover:bg-[#0a3c4a] text-white text-xs font-semibold inline-flex items-center gap-1.5"
                   >
                     <Wifi className="w-3.5 h-3.5" aria-hidden="true" />
-                    {workspace ? 'Aggiorna e Ricollega' : 'Collega Dispositivo in Tempo Reale'}
+                    {workspace
+                      ? lang === 'en'
+                        ? 'Update & Reconnect'
+                        : 'Aggiorna e Ricollega'
+                      : lang === 'en'
+                        ? 'Connect Device in Real Time'
+                        : 'Collega Dispositivo in Tempo Reale'}
                   </button>
                 </div>
               </form>
@@ -345,7 +402,9 @@ export function AgencySyncModal({
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-bold text-[#0e4d5f] uppercase tracking-wider flex items-center gap-1.5">
                     <Users className="w-4 h-4 text-[#177858]" aria-hidden="true" />
-                    Agenti e Dispositivi Online ({members.length})
+                    {lang === 'en'
+                      ? `Agents & Devices Online (${members.length})`
+                      : `Agenti e Dispositivi Online (${members.length})`}
                   </h3>
                   {activeAgencyCode && (
                     <span className="text-xs font-mono font-bold text-[#0e4d5f] bg-[#eef6f5] px-2 py-0.5 rounded border border-[#cbe2de]">
@@ -356,8 +415,9 @@ export function AgencySyncModal({
 
                 {members.length === 0 ? (
                   <p className="text-xs text-[#5a808a] bg-[#f9fcfc] border border-dashed border-[#cbe2de] rounded-xl p-4">
-                    Nessun dispositivo connesso. Inserisci un Codice Agenzia qui sopra e premi
-                    &ldquo;Collega Dispositivo in Tempo Reale&rdquo;.
+                    {lang === 'en'
+                      ? 'No devices connected. Enter an Agency Code above and click "Connect Device in Real Time".'
+                      : 'Nessun dispositivo connesso. Inserisci un Codice Agenzia qui sopra e premi "Collega Dispositivo in Tempo Reale".'}
                   </p>
                 ) : (
                   <div
@@ -384,7 +444,7 @@ export function AgencySyncModal({
                                 {m.agentName}
                                 {isSelf && (
                                   <span className="ml-1.5 text-[10px] font-semibold text-[#177858]">
-                                    (Questo dispositivo)
+                                    {lang === 'en' ? '(This device)' : '(Questo dispositivo)'}
                                   </span>
                                 )}
                               </div>
@@ -405,14 +465,14 @@ export function AgencySyncModal({
               {recentEvents.length > 0 && (
                 <div className="space-y-2">
                   <h3 className="text-xs font-bold text-[#0e4d5f] uppercase tracking-wider">
-                    Attività Team in Tempo Reale
+                    {lang === 'en' ? 'Live Team Activity' : 'Attività Team in Tempo Reale'}
                   </h3>
                   <div
                     data-testid="agency-events-list"
                     className="max-h-44 overflow-y-auto divide-y divide-[#e8f2f0] border border-[#cbe2de] rounded-xl bg-white"
                   >
                     {recentEvents.map((evt) => {
-                      const timeStr = new Date(evt.timestamp).toLocaleTimeString('it-IT', {
+                      const timeStr = new Date(evt.timestamp).toLocaleTimeString(locale, {
                         hour: '2-digit',
                         minute: '2-digit',
                       });

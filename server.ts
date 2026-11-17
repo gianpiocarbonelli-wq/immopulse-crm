@@ -4,6 +4,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
 import { AgencyHub, normalizeServerAgencyCode } from './src/server/agencyHub.ts';
+import {
+  GeminiHttpError,
+  runMultiPortalSearch,
+  runRealEstateChat,
+} from './src/server/geminiService.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -28,6 +33,54 @@ async function startServer() {
       return;
     }
     res.json(hub.getRoomInfo(code));
+  });
+
+  app.post('/api/chatbot', async (req, res) => {
+    try {
+      const { messages, appContext, valuationRequest, lang } = req.body ?? {};
+      const result = await runRealEstateChat({ messages, appContext, valuationRequest, lang });
+      res.json(result);
+    } catch (err: unknown) {
+      if (err instanceof GeminiHttpError) {
+        res.status(err.status).json({ error: err.message });
+        return;
+      }
+      const message =
+        err instanceof Error
+          ? err.message
+          : 'Errore imprevisto durante la generazione della risposta AI.';
+      res
+        .status(
+          message.includes('nessuna chiave') || message.toLowerCase().includes('no gemini api key')
+            ? 503
+            : 500,
+        )
+        .json({ error: message });
+    }
+  });
+
+  app.post('/api/portal-search', async (req, res) => {
+    try {
+      const { query, filters, portals, lang } = req.body ?? {};
+      const result = await runMultiPortalSearch({ query, filters, portals, lang });
+      res.json(result);
+    } catch (err: unknown) {
+      if (err instanceof GeminiHttpError) {
+        res.status(err.status).json({ error: err.message });
+        return;
+      }
+      const message =
+        err instanceof Error
+          ? err.message
+          : 'Errore imprevisto durante la ricerca sui portali immobiliari.';
+      res
+        .status(
+          message.includes('nessuna chiave') || message.toLowerCase().includes('no gemini api key')
+            ? 503
+            : 500,
+        )
+        .json({ error: message });
+    }
   });
 
   const httpServer = createServer(app);
@@ -237,14 +290,50 @@ async function startServer() {
       server: {
         middlewareMode: true,
         hmr: false,
+        ws: false,
       },
       appType: 'spa',
+    });
+    app.get('/@vite/client', async (req, res, next) => {
+      try {
+        const result = await vite.transformRequest(req.originalUrl);
+        if (!result) {
+          next();
+          return;
+        }
+        const safeCode = result.code.replace(
+          /let wsTransport = createWebSocketModuleRunnerTransport\(\{[\s\S]*?\}\);/,
+          'const wsTransport = { async connect() {}, async disconnect() {}, send() {} };',
+        );
+        res.status(200).setHeader('Content-Type', 'text/javascript; charset=utf-8').send(safeCode);
+      } catch (err) {
+        next(err);
+      }
     });
     app.use(vite.middlewares);
   } else {
     const distDir = path.resolve(__dirname, 'dist');
-    app.use(express.static(distDir));
+    app.use('/api/*', (_req, res) => {
+      res.status(404).json({ error: 'Endpoint API non trovato.' });
+    });
+    app.use(
+      express.static(distDir, {
+        setHeaders(res, filePath) {
+          if (filePath.endsWith('sw.js') || filePath.endsWith('index.html')) {
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          } else if (filePath.endsWith('manifest.webmanifest')) {
+            res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+            res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+          } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          } else if (/\.(?:png|svg|ico|webp|jpg|jpeg)$/i.test(filePath)) {
+            res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+          }
+        },
+      }),
+    );
     app.get('*', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.sendFile(path.join(distDir, 'index.html'));
     });
   }

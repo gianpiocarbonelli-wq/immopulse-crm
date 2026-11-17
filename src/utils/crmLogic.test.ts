@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import {
   addTagToList,
   applyDeleteClientSync,
+  applyLicenseCodeActivation,
+  applyPaymentSuccessActivation,
+  applyStripePlanActivation,
+  applyStripeProActivation,
   applyUpsertClientSync,
   buildMapsUrl,
   buildUpcoming7DaysBuckets,
@@ -11,7 +15,9 @@ import {
   canUseWhatsAppAndMap,
   computeMatches,
   computeMetrics,
+  computeSubscriptionExpiry,
   encodeArg,
+  evaluateSubscriptionStatus,
   filterAndSortClients,
   filterRemindersByDay,
   generateAgencyCode,
@@ -23,19 +29,33 @@ import {
   getClientNote,
   getClientPhotos,
   getLatestInteraction,
+  getSubscriptionPlanLabel,
   getVisibleClientsPool,
+  hasPaidRedirectParam,
+  hasPaymentSuccessParam,
   isValidClient,
+  LICENSE_FALLBACK_EMAIL,
   normalizeAgencyCode,
   normalizeClientRecord,
   normalizeHistory,
   normalizeTags,
   parseBudgetBound,
+  parsePaidRedirectParam,
+  PAYMENT_SUCCESS_FALLBACK_EMAIL,
+  reconcileExpiredSubscription,
   removeTagFromList,
+  STRIPE_ANNUAL_FALLBACK_EMAIL,
+  STRIPE_MONTHLY_FALLBACK_EMAIL,
+  STRIPE_PRO_FALLBACK_EMAIL,
+  stripPaidRedirectParam,
+  SUBSCRIPTION_WARNING_DAYS,
   toLocalDateKey,
   toggleClientFavorite,
   validateCardPayment,
   validateDigitalPayment,
+  validateLicenseCode,
 } from './crmLogic';
+import { clearProActiveFlag, loadProActiveFlag, saveProActiveFlag } from './storage';
 
 test('encodeArg encodes apostrophes and special characters safely', () => {
   const encoded = encodeArg("Antonio D'Amico (Sant'Ambrogio)!");
@@ -46,20 +66,51 @@ test('encodeArg encodes apostrophes and special characters safely', () => {
   assert.equal(decodeURIComponent(encoded), "Antonio D'Amico (Sant'Ambrogio)!");
 });
 
-test('plan limits and channel permissions enforce Free (3), Basic (10), and Full (Infinity)', () => {
+test('plan limits and channel permissions enforce Free (3), Singolo Pro (Infinity), and Agenzia (Infinity)', () => {
   assert.equal(getClientLimit('free'), 3);
-  assert.equal(getClientLimit('basic'), 10);
-  assert.equal(getClientLimit('full'), Infinity);
+  assert.equal(getClientLimit('pro'), Infinity);
+  assert.equal(getClientLimit('agency'), Infinity);
 
   assert.equal(canUseWhatsAppAndMap('free'), false);
-  assert.equal(canUseWhatsAppAndMap('basic'), true);
-  assert.equal(canUseWhatsAppAndMap('full'), true);
+  assert.equal(canUseWhatsAppAndMap('pro'), true);
+  assert.equal(canUseWhatsAppAndMap('agency'), true);
 
   const demo50 = generateDemoClients(50, new Date('2026-11-14T10:00:00Z').getTime());
   assert.equal(demo50.length, 50);
   assert.equal(getVisibleClientsPool(demo50, 'free').length, 3);
-  assert.equal(getVisibleClientsPool(demo50, 'basic').length, 10);
-  assert.equal(getVisibleClientsPool(demo50, 'full').length, 50);
+  assert.equal(getVisibleClientsPool(demo50, 'pro').length, 50);
+  assert.equal(getVisibleClientsPool(demo50, 'agency').length, 50);
+
+  // Legacy stored accounts ('basic' | 'full') upgrade seamlessly to 'pro' while subscription is active
+  const legacyRefNow = Date.parse('2026-01-10T00:00:00Z');
+  assert.equal(
+    getActivePlan(
+      {
+        name: 'Legacy',
+        email: 'legacy@agenzia.it',
+        password: 'secret',
+        plan: 'basic' as unknown as 'pro',
+        paymentMethod: 'PayPal',
+        activatedAt: '2026-01-01T00:00:00Z',
+      },
+      legacyRefNow,
+    ),
+    'pro',
+  );
+  assert.equal(
+    getActivePlan(
+      {
+        name: 'Legacy Full',
+        email: 'full@agenzia.it',
+        password: 'secret',
+        plan: 'full' as unknown as 'pro',
+        paymentMethod: 'PayPal',
+        activatedAt: '2026-01-01T00:00:00Z',
+      },
+      legacyRefNow,
+    ),
+    'pro',
+  );
 });
 
 test('filterAndSortClients handles search with apostrophes, status, role, and price sort', () => {
@@ -353,19 +404,21 @@ test('agency annual plan permissions, agency codes, and idempotent client sync h
   assert.equal(getClientLimit('agency'), Infinity);
   assert.equal(canUseWhatsAppAndMap('agency'), true);
   assert.equal(canUseAgencySync('free'), false);
-  assert.equal(canUseAgencySync('basic'), false);
-  assert.equal(canUseAgencySync('full'), false);
+  assert.equal(canUseAgencySync('pro'), false);
   assert.equal(canUseAgencySync('agency'), true);
 
   assert.equal(
-    getActivePlan({
-      name: 'Studio Rossi',
-      email: 'team@rossi.it',
-      password: 'secret',
-      plan: 'agency',
-      paymentMethod: 'PayPal',
-      activatedAt: '2026-11-14T10:00:00Z',
-    }),
+    getActivePlan(
+      {
+        name: 'Studio Rossi',
+        email: 'team@rossi.it',
+        password: 'secret',
+        plan: 'agency',
+        paymentMethod: 'PayPal',
+        activatedAt: '2026-11-14T10:00:00Z',
+      },
+      Date.parse('2026-11-15T10:00:00Z'),
+    ),
     'agency',
   );
 
@@ -478,6 +531,258 @@ test('parseBudgetBound and budget range + attached photos filters work accuratel
     ['demo-1'],
   );
 });
+
+test('subscription lifecycle computes expiry, triggers 5-day pre-expiry warning, and downgrades expired plans to Free', () => {
+  const DAY_MS = 86_400_000;
+  const nowMs = Date.parse('2026-11-15T12:00:00Z');
+
+  // Monthly Pro (30 days) and Annual Agency (365 days)
+  const monthlyExpiry = computeSubscriptionExpiry(nowMs, 'pro', 'monthly');
+  assert.equal(Date.parse(monthlyExpiry), nowMs + 30 * DAY_MS);
+
+  const annualProExpiry = computeSubscriptionExpiry(nowMs, 'pro', 'annual');
+  assert.equal(Date.parse(annualProExpiry), nowMs + 365 * DAY_MS);
+
+  const agencyExpiry = computeSubscriptionExpiry(nowMs, 'agency', 'monthly'); // forced annual for agency
+  assert.equal(Date.parse(agencyExpiry), nowMs + 365 * DAY_MS);
+
+  // Early renewal stacks on top of remaining days instead of forfeiting them
+  const twoDaysLeftIso = new Date(nowMs + 2 * DAY_MS).toISOString();
+  const renewedIso = computeSubscriptionExpiry(nowMs, 'pro', 'monthly', twoDaysLeftIso);
+  assert.equal(Date.parse(renewedIso), nowMs + 32 * DAY_MS);
+
+  assert.equal(SUBSCRIPTION_WARNING_DAYS, 5);
+
+  // Active (> 5 days remaining)
+  const activeProUser = {
+    name: 'Mario',
+    email: 'mario@agenzia.it',
+    password: 'pwd',
+    plan: 'pro' as const,
+    billingCycle: 'monthly' as const,
+    paymentMethod: 'PayPal',
+    activatedAt: new Date(nowMs - 10 * DAY_MS).toISOString(),
+    expiresAt: new Date(nowMs + 10 * DAY_MS).toISOString(),
+  };
+  const activeStatus = evaluateSubscriptionStatus(activeProUser, nowMs);
+  assert.equal(activeStatus.phase, 'active');
+  assert.equal(activeStatus.plan, 'pro');
+  assert.equal(activeStatus.daysRemaining, 10);
+
+  // Warning window at exactly 5 days remaining and 1 day remaining
+  const fiveDaysLeftUser = {
+    ...activeProUser,
+    expiresAt: new Date(nowMs + 5 * DAY_MS).toISOString(),
+  };
+  const warn5 = evaluateSubscriptionStatus(fiveDaysLeftUser, nowMs);
+  assert.equal(warn5.phase, 'expiring_soon');
+  assert.equal(warn5.plan, 'pro');
+  assert.equal(warn5.daysRemaining, 5);
+
+  const lessThanOneDayUser = {
+    ...activeProUser,
+    expiresAt: new Date(nowMs + 6 * 3600_000).toISOString(),
+  };
+  const warn1 = evaluateSubscriptionStatus(lessThanOneDayUser, nowMs);
+  assert.equal(warn1.phase, 'expiring_soon');
+  assert.equal(warn1.daysRemaining, 1);
+
+  // Expired paid plan reverts to Free via reconcileExpiredSubscription
+  const expiredAgencyUser = {
+    name: 'Agenzia Nord',
+    email: 'team@nord.it',
+    password: 'pwd',
+    plan: 'agency' as const,
+    billingCycle: 'annual' as const,
+    paymentMethod: 'Carta di Credito/Debito',
+    activatedAt: new Date(nowMs - 370 * DAY_MS).toISOString(),
+    expiresAt: new Date(nowMs - 3600_000).toISOString(),
+  };
+
+  assert.equal(getActivePlan(expiredAgencyUser, nowMs), 'free');
+  const reconciled = reconcileExpiredSubscription(expiredAgencyUser, nowMs);
+  assert.equal(reconciled.downgradedFrom, 'agency');
+  assert.equal(reconciled.user.plan, 'free');
+  assert.equal(reconciled.user.expiredFromPlan, 'agency');
+  assert.equal(reconciled.user.expiredAt, new Date(nowMs).toISOString());
+
+  // Already reconciled Free user retains 'expired' phase while expiredFromPlan is set
+  const postDowngradeStatus = evaluateSubscriptionStatus(reconciled.user, nowMs);
+  assert.equal(postDowngradeStatus.phase, 'expired');
+  assert.equal(postDowngradeStatus.plan, 'free');
+  assert.equal(postDowngradeStatus.expiredFromPlan, 'agency');
+
+  // Re-running reconcile on already-free user is a no-op
+  const secondPass = reconcileExpiredSubscription(reconciled.user, nowMs);
+  assert.equal(secondPass.downgradedFrom, null);
+
+  // Legacy account without expiresAt infers expiry from activatedAt
+  const legacyExpired = {
+    name: 'Legacy Expired',
+    email: 'legacy-exp@agenzia.it',
+    password: 'pwd',
+    plan: 'pro' as const,
+    paymentMethod: 'PayPal',
+    activatedAt: new Date(nowMs - 40 * DAY_MS).toISOString(),
+  };
+  assert.equal(evaluateSubscriptionStatus(legacyExpired, nowMs).phase, 'expired');
+  assert.equal(getActivePlan(legacyExpired, nowMs), 'free');
+
+  assert.equal(getSubscriptionPlanLabel('pro', 'monthly'), 'Singolo Pro (Mensile)');
+  assert.equal(getSubscriptionPlanLabel('pro', 'annual'), 'Singolo Pro (Annuale)');
+  assert.equal(getSubscriptionPlanLabel('agency', 'annual'), 'Agenzia / Team (Annuale)');
+});
+
+test('Stripe ?pagato=mensile / ?pagato=true / ?pagato=annuale / ?pagato=pro redirect helpers activate plans safely and strip URL query param', () => {
+  assert.equal(parsePaidRedirectParam('?pagato=mensile'), 'monthly_1490');
+  assert.equal(parsePaidRedirectParam('?pagato=true'), 'monthly_1490');
+  assert.equal(parsePaidRedirectParam('?foo=1&pagato=annuale&bar=2'), 'annual_99');
+  assert.equal(parsePaidRedirectParam('?foo=1&pagato=pro&bar=2'), 'pro_149');
+  assert.equal(parsePaidRedirectParam('?pagato=false'), null);
+  assert.equal(parsePaidRedirectParam(''), null);
+
+  assert.equal(hasPaidRedirectParam('?pagato=true'), true);
+  assert.equal(hasPaidRedirectParam('?pagato=mensile'), true);
+  assert.equal(hasPaidRedirectParam('?pagato=annuale'), true);
+  assert.equal(hasPaidRedirectParam('?pagato=pro'), true);
+  assert.equal(hasPaidRedirectParam('?pagato=false'), false);
+  assert.equal(hasPaidRedirectParam(''), false);
+
+  assert.equal(stripPaidRedirectParam('https://example.com/?pagato=true'), '/');
+  assert.equal(stripPaidRedirectParam('https://example.com/?pagato=mensile'), '/');
+  assert.equal(stripPaidRedirectParam('https://example.com/?pagato=annuale'), '/');
+  assert.equal(stripPaidRedirectParam('https://example.com/crm?foo=1&pagato=pro#top'), '/crm?foo=1#top');
+
+  const nowMs = Date.parse('2026-11-16T10:00:00Z');
+  // 1) Guest ?pagato=mensile / ?pagato=true activates Piano Mensile (€ 14,90/mese -> plan 'pro', cycle 'monthly')
+  const guestMonthlyResult = applyStripeProActivation([], null, nowMs);
+  assert.equal(guestMonthlyResult.sessionEmail, STRIPE_MONTHLY_FALLBACK_EMAIL);
+  assert.equal(guestMonthlyResult.activatedUser.plan, 'pro');
+  assert.equal(guestMonthlyResult.activatedUser.billingCycle, 'monthly');
+  assert.equal(guestMonthlyResult.activatedUser.paymentMethod, 'Stripe');
+  assert.equal(guestMonthlyResult.accounts.length, 1);
+  assert.equal(getActivePlan(guestMonthlyResult.activatedUser, nowMs), 'pro');
+
+  // StrictMode idempotent double invocation within 60s does not extend expiry twice
+  const secondGuestPass = applyStripeProActivation(
+    guestMonthlyResult.accounts,
+    guestMonthlyResult.sessionEmail,
+    nowMs + 100,
+  );
+  assert.equal(secondGuestPass.activatedUser.expiresAt, guestMonthlyResult.activatedUser.expiresAt);
+
+  // Upgrading from ?pagato=mensile to ?pagato=annuale updates cycle to 'annual' (99 €/anno)
+  const upgradedToAnnual99 = applyStripePlanActivation(
+    guestMonthlyResult.accounts,
+    guestMonthlyResult.sessionEmail,
+    'annual_99',
+    nowMs + 150,
+  );
+  assert.equal(upgradedToAnnual99.activatedUser.plan, 'pro');
+  assert.equal(upgradedToAnnual99.activatedUser.billingCycle, 'annual');
+
+  // 2) Guest ?pagato=annuale directly creates fallback € 99/anno account cleanly
+  const guestAnnualResult = applyStripePlanActivation([], null, 'annual_99', nowMs);
+  assert.equal(guestAnnualResult.sessionEmail, STRIPE_ANNUAL_FALLBACK_EMAIL);
+  assert.equal(guestAnnualResult.activatedUser.plan, 'pro');
+  assert.equal(guestAnnualResult.activatedUser.billingCycle, 'annual');
+  assert.equal(getActivePlan(guestAnnualResult.activatedUser, nowMs), 'pro');
+
+  // 3) Guest ?pagato=pro directly creates fallback Pro Licenza (€ 149) account cleanly
+  const guestProResult = applyStripePlanActivation([], null, 'pro_149', nowMs);
+  assert.equal(guestProResult.sessionEmail, STRIPE_PRO_FALLBACK_EMAIL);
+  assert.equal(guestProResult.activatedUser.plan, 'agency');
+  assert.equal(guestProResult.activatedUser.billingCycle, 'annual');
+  assert.equal(getActivePlan(guestProResult.activatedUser, nowMs), 'agency');
+
+  // Logged-in Free user gets upgraded in-place keeping their email & name
+  const loggedInFree = [
+    {
+      name: 'Elena Neri',
+      email: 'elena@immobiliare.it',
+      password: 'pwd',
+      plan: 'free' as const,
+      paymentMethod: '',
+      activatedAt: '',
+      expiredFromPlan: 'pro' as const,
+    },
+  ];
+  const upgraded = applyStripePlanActivation(loggedInFree, 'elena@immobiliare.it', 'annual_99', nowMs);
+  assert.equal(upgraded.sessionEmail, 'elena@immobiliare.it');
+  assert.equal(upgraded.activatedUser.name, 'Elena Neri');
+  assert.equal(upgraded.activatedUser.plan, 'pro');
+  assert.equal(upgraded.activatedUser.billingCycle, 'annual');
+  assert.equal(upgraded.activatedUser.expiredFromPlan, undefined);
+});
+
+test('license code validation and local Pro/Agency unlock work cleanly', () => {
+  const emptyCheck = validateLicenseCode('   ', 'it');
+  assert.equal(emptyCheck.valid, false);
+
+  const invalidShort = validateLicenseCode('123', 'en');
+  assert.equal(invalidShort.valid, false);
+
+  const validCompact = validateLicenseCode('immopulse2026', 'it');
+  assert.equal(validCompact.valid, true);
+  if (validCompact.valid) {
+    assert.equal(validCompact.normalizedCode, 'IMMOPULSE2026');
+    assert.equal(validCompact.plan, 'pro');
+    assert.equal(validCompact.billingCycle, 'annual');
+  }
+
+  const validPro = validateLicenseCode(' immo-pro-2026 ', 'it');
+  assert.equal(validPro.valid, true);
+  if (validPro.valid) {
+    assert.equal(validPro.normalizedCode, 'IMMO-PRO-2026');
+    assert.equal(validPro.plan, 'pro');
+    assert.equal(validPro.billingCycle, 'annual');
+  }
+
+  const validAgency = validateLicenseCode('IMMO-AGENZIA-99', 'it');
+  assert.equal(validAgency.valid, true);
+  if (validAgency.valid) {
+    assert.equal(validAgency.plan, 'agency');
+  }
+
+  const nowMs = Date.parse('2026-11-16T12:00:00Z');
+  const guestUnlock = applyLicenseCodeActivation([], null, 'IMMO-PRO-2026', nowMs, 'it');
+  assert.equal(guestUnlock.ok, true);
+  if (guestUnlock.ok) {
+    assert.equal(guestUnlock.sessionEmail, LICENSE_FALLBACK_EMAIL);
+    assert.equal(guestUnlock.activatedUser.plan, 'pro');
+    assert.equal(guestUnlock.activatedUser.licenseCode, 'IMMO-PRO-2026');
+    assert.equal(getActivePlan(guestUnlock.activatedUser, nowMs), 'pro');
+  }
+});
+
+test('?payment=success / &payment=success activates Pro immediately and persists immopulse_pro_active', () => {
+  assert.equal(hasPaymentSuccessParam('?payment=success'), true);
+  assert.equal(hasPaymentSuccessParam('?session_id=cs_123&payment=success'), true);
+  assert.equal(hasPaymentSuccessParam('?payment=failed'), false);
+  assert.equal(hasPaymentSuccessParam(''), false);
+
+  assert.equal(stripPaidRedirectParam('https://immopulse.local/?payment=success'), '/');
+  assert.equal(stripPaidRedirectParam('https://immopulse.local/crm?foo=1&payment=success'), '/crm?foo=1');
+
+  const nowMs = Date.parse('2026-11-16T12:30:00Z');
+  const res = applyPaymentSuccessActivation([], null, nowMs);
+  assert.equal(res.sessionEmail, PAYMENT_SUCCESS_FALLBACK_EMAIL);
+  assert.equal(res.activatedUser.plan, 'pro');
+  assert.equal(res.activatedUser.paymentMethod, 'Stripe');
+  assert.equal(res.activatedAt, '2026-11-16T12:30:00.000Z');
+  assert.equal(getActivePlan(res.activatedUser, nowMs), 'pro');
+  assert.equal(canUseWhatsAppAndMap(res.activatedUser.plan), true);
+  assert.equal(getClientLimit(res.activatedUser.plan), Infinity);
+
+  clearProActiveFlag();
+  assert.equal(loadProActiveFlag().active, false);
+  assert.equal(saveProActiveFlag(res.activatedAt), true);
+  const loadedFlag = loadProActiveFlag();
+  assert.equal(loadedFlag.active, true);
+  assert.equal(loadedFlag.activatedAt, res.activatedAt);
+  clearProActiveFlag();
+});
+
 
 
 
