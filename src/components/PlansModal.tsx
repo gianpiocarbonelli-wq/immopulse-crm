@@ -22,10 +22,12 @@ import type {
   UserAccount,
 } from '../types/crm';
 import {
+  formatPrice,
   STRIPE_ANNUAL_CHECKOUT_URL,
   STRIPE_CUSTOMER_PORTAL_URL,
   STRIPE_MONTHLY_CHECKOUT_URL,
   STRIPE_PRO_CHECKOUT_URL,
+  SUBSCRIPTION_CONFIG,
 } from '../utils/legalAndSupport';
 
 export interface LicenseVerifyCallbackResult {
@@ -67,7 +69,12 @@ export function PlansModal({
     if (!isOpen) return;
     setLicenseInput(savedLicenseCode || currentUser?.licenseCode || '');
     setLicenseFeedback(null);
-  }, [isOpen, savedLicenseCode, currentUser?.licenseCode]);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, savedLicenseCode, currentUser?.licenseCode, onClose]);
 
   if (!isOpen) return null;
 
@@ -193,8 +200,8 @@ export function PlansModal({
                 <h3 className="text-base font-bold text-[#0e4d5f]">
                   {isEn ? 'ImmoPulse License' : 'Licenza ImmoPulse'}
                 </h3>
-                <div className="text-3xl font-bold text-[#0e4d5f] font-mono tabular-nums">
-                  14,90 €{' '}
+                <div className="text-3xl font-bold text-[#0e4d5f] font-mono tabular-nums" data-testid="plan-price-monthly">
+                  {formatPrice(SUBSCRIPTION_CONFIG.plans.monthly.priceEUR)}{' '}
                   <span className="text-xs font-sans font-normal text-[#5a808a]">
                     / {isEn ? 'month' : 'mese'}
                   </span>
@@ -277,16 +284,16 @@ export function PlansModal({
                 <h3 className="text-base font-bold text-[#0e4d5f]">
                   {isEn ? 'ImmoPulse Agent Pro License' : 'Licenza Agente ImmoPulse Pro'}
                 </h3>
-                <div className="text-3xl font-bold text-[#0e4d5f] font-mono tabular-nums">
-                  99,00 €{' '}
+                <div className="text-3xl font-bold text-[#0e4d5f] font-mono tabular-nums" data-testid="plan-price-annual">
+                  {formatPrice(SUBSCRIPTION_CONFIG.plans.annual.priceEUR)}{' '}
                   <span className="text-xs font-sans font-normal text-[#5a808a]">
                     / {isEn ? 'year' : 'anno'}
                   </span>
                 </div>
                 <p className="text-xs text-[#3b5e68] leading-relaxed">
                   {isEn
-                    ? 'Ideal for solo real estate agents. Save over € 79 compared to the monthly plan.'
-                    : 'Ideale per singoli agenti immobiliari. Risparmi oltre 79 € rispetto al piano mensile.'}
+                    ? 'Ideal for solo real estate agents. Save over € 104 compared to the monthly plan.'
+                    : 'Ideale per singoli agenti immobiliari. Risparmi oltre 104 € rispetto al piano mensile.'}
                 </p>
                 <ul className="text-xs space-y-2.5 text-[#25454e] pt-2 border-t border-[#cbe2de]">
                   <li className="flex items-start gap-2">
@@ -362,8 +369,8 @@ export function PlansModal({
                 <h3 className="text-base font-bold text-[#0e4d5f]">
                   {isEn ? 'ImmoPulse Agency Pro License' : 'Licenza Agenzia ImmoPulse Pro'}
                 </h3>
-                <div className="text-3xl font-bold text-[#0e4d5f] font-mono tabular-nums">
-                  149,00 €{' '}
+                <div className="text-3xl font-bold text-[#0e4d5f] font-mono tabular-nums" data-testid="plan-price-agency">
+                  {formatPrice(SUBSCRIPTION_CONFIG.plans.agency.priceEUR)}{' '}
                   <span className="text-xs font-sans font-normal text-[#5a808a]">
                     / {isEn ? 'year' : 'anno'}
                   </span>
@@ -436,8 +443,8 @@ export function PlansModal({
             <ShieldCheck className="w-4 h-4 text-[#177858] shrink-0 mt-0.5 sm:mt-0" aria-hidden="true" />
             <p className="leading-relaxed">
               {isEn
-                ? 'Secure payments processed via Stripe.'
-                : 'Pagamenti sicuri gestiti tramite Stripe.'}
+                ? 'Secure payments processed via Stripe — Fixed Euro (EUR €) pricing without automatic local currency conversion.'
+                : 'Pagamenti sicuri gestiti tramite Stripe — Prezzi fissi in Euro (EUR €), nessuna conversione automatica in valuta locale.'}
             </p>
           </div>
 

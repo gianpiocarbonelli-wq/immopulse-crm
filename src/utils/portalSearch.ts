@@ -822,7 +822,7 @@ export function buildDirectPortalSearchUrl(
     }
     const base = `https://www.casa.it/${contractPath}/${citySlug}/`;
     if (maxDigits) {
-      return `${base}?prezzoMax=${encodeURIComponent(maxDigits)}`;
+      return `${base}?priceMax=${encodeURIComponent(maxDigits)}`;
     }
     return base;
   }
@@ -844,4 +844,221 @@ export function buildGooglePortalQuickSearchUrl(
   return `https://www.google.com/search?q=${encodeURIComponent(searchTerms)}`;
 }
 
+export interface RadarSearchOptions {
+  city: string;
+  maxPrice?: string | number;
+  rooms?: string | number;
+  contract?: 'vendita' | 'affitto';
+  onlyPrivate?: boolean;
+  extraQuery?: string;
+}
+
+export interface RadarPortalTarget {
+  id: string;
+  name: string;
+  host: 'immobiliare.it' | 'idealista.it' | 'casa.it' | 'subito.it';
+  url: string;
+  googleUrl: string;
+}
+
+export function parseRoomsCount(raw?: string | number | null): string {
+  if (raw === null || raw === undefined) return '';
+  const match = String(raw).match(/\d+/);
+  if (!match) return '';
+  const n = Number(match[0]);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  return String(Math.min(Math.max(Math.round(n), 1), 6));
+}
+
+function getIdealistaRoomsSegment(roomsCount: string): string {
+  const n = Number(roomsCount);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  if (n === 1) return 'monolocali';
+  if (n === 2) return 'bilocali,trilocali,quadrilocali';
+  if (n === 3) return 'trilocali,quadrilocali';
+  return 'quadrilocali';
+}
+
+export function buildRadarPortalUrls(options: RadarSearchOptions): RadarPortalTarget[] {
+  const rawCity = String(options.city ?? '').trim() || 'Milano';
+  const citySlug = resolvePortalCitySlug(rawCity) || 'milano';
+  const contract = options.contract === 'affitto' ? 'affitto' : 'vendita';
+  const priceDigits = normalizePriceDigits(String(options.maxPrice ?? ''));
+  const priceNum = priceDigits && Number(priceDigits) > 0 ? priceDigits : '';
+  const roomsMin = parseRoomsCount(options.rooms);
+  const onlyPrivate = Boolean(options.onlyPrivate);
+  const extraQuery = String(options.extraQuery ?? '').trim();
+
+  // 1. Immobiliare.it
+  const immParams = new URLSearchParams();
+  immParams.set('criterio', 'dataModifica');
+  immParams.set('ordine', 'desc');
+  if (priceNum) immParams.set('prezzoMassimo', priceNum);
+  if (roomsMin) immParams.set('localiMinimo', roomsMin);
+  if (onlyPrivate) immParams.set('idMZona', 'privati');
+  const immContractPath = contract === 'affitto' ? 'affitto-case' : 'vendita-case';
+  const urlImmobiliare = `https://www.immobiliare.it/${immContractPath}/${citySlug}/?${immParams.toString()}`;
+
+  // 2. Idealista.it (province capitals require -provincia to avoid 404)
+  const ideAreaSlug = ITALIAN_PROVINCE_CAPITALS.has(citySlug)
+    ? `${citySlug}-provincia`
+    : citySlug;
+  const ideFilters: string[] = [];
+  if (priceNum) ideFilters.push(`con-prezzo_${priceNum}`);
+  const ideRooms = getIdealistaRoomsSegment(roomsMin);
+  if (ideRooms) ideFilters.push(ideRooms);
+  if (onlyPrivate) ideFilters.push('solo-privati');
+
+  let ideFilterPath = '';
+  if (ideFilters.length > 0) {
+    const joined = ideFilters.join(',');
+    ideFilterPath = `${joined.startsWith('con-') ? joined : `con-${joined}`}/`;
+  }
+  const urlIdealista = `https://www.idealista.it/${immContractPath}/${ideAreaSlug}/${ideFilterPath}?ordine=pubblicazione-desc`;
+
+  // 3. Casa.it (uses priceMax, roomsMin, sortType, sellerType)
+  const casaParams = new URLSearchParams();
+  casaParams.set('sortType', 'date_desc');
+  if (priceNum) casaParams.set('priceMax', priceNum);
+  if (roomsMin) casaParams.set('roomsMin', roomsMin);
+  if (onlyPrivate) casaParams.set('sellerType', 'private');
+  const casaContractPath = contract === 'affitto' ? 'affitto/residenziale' : 'vendita/residenziale';
+  const urlCasa = `https://www.casa.it/${casaContractPath}/${citySlug}/?${casaParams.toString()}`;
+
+  // 4. Subito.it (pe = max price, advt=0 = solo privati)
+  const subitoParams = new URLSearchParams();
+  const subitoQuery = [
+    rawCity,
+    extraQuery,
+    roomsMin ? `${roomsMin} locali` : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (subitoQuery) subitoParams.set('q', subitoQuery);
+  if (priceNum) subitoParams.set('pe', priceNum);
+  if (onlyPrivate) subitoParams.set('advt', '0');
+  const subitoContractPath = contract === 'affitto' ? 'affitto/appartamenti' : 'vendita/appartamenti';
+  const urlSubito = `https://www.subito.it/annunci-italia/${subitoContractPath}/?${subitoParams.toString()}`;
+
+  const googleBaseTerms = [
+    contract,
+    rawCity,
+    extraQuery,
+    roomsMin ? `${roomsMin} locali` : '',
+    priceNum ? `fino a ${priceNum} euro` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  const makeGoogleUrl = (host: string) =>
+    `https://www.google.com/search?q=${encodeURIComponent(`site:${host} ${googleBaseTerms}`)}`;
+
+  return [
+    {
+      id: 'portal-immobiliare',
+      name: 'Immobiliare.it',
+      host: 'immobiliare.it',
+      url: urlImmobiliare,
+      googleUrl: makeGoogleUrl('immobiliare.it'),
+    },
+    {
+      id: 'portal-idealista',
+      name: 'Idealista.it',
+      host: 'idealista.it',
+      url: urlIdealista,
+      googleUrl: makeGoogleUrl('idealista.it'),
+    },
+    {
+      id: 'portal-casa',
+      name: 'Casa.it',
+      host: 'casa.it',
+      url: urlCasa,
+      googleUrl: makeGoogleUrl('casa.it'),
+    },
+    {
+      id: 'portal-subito',
+      name: 'Subito.it',
+      host: 'subito.it',
+      url: urlSubito,
+      googleUrl: makeGoogleUrl('subito.it'),
+    },
+  ];
+}
+
+export interface MultiPortalLaunchItem {
+  id?: string;
+  name: string;
+  url: string;
+  host?: string;
+  googleUrl?: string;
+}
+
+export interface MultiPortalLaunchResult {
+  openedCount: number;
+  blockedPortals: MultiPortalLaunchItem[];
+  allPortals: MultiPortalLaunchItem[];
+}
+
+export function openMultiPortalWindows(
+  portals: MultiPortalLaunchItem[],
+  mode: 'tabs' | 'grid' = 'tabs',
+): MultiPortalLaunchResult {
+  if (typeof window === 'undefined') {
+    return { openedCount: 0, blockedPortals: portals, allPortals: portals };
+  }
+
+  const blockedPortals: MultiPortalLaunchItem[] = [];
+  let openedCount = 0;
+
+  const isDesktopGrid = mode === 'grid' && typeof window.screen !== 'undefined' && window.innerWidth >= 768;
+  const w = isDesktopGrid ? Math.max(420, Math.floor(window.screen.availWidth / 2)) : 0;
+  const h = isDesktopGrid ? Math.max(400, Math.floor(window.screen.availHeight / 2)) : 0;
+  const positions = [
+    { left: 0, top: 0 },
+    { left: w, top: 0 },
+    { left: 0, top: h },
+    { left: w, top: h },
+  ];
+
+  portals.forEach((portal, index) => {
+    let win: Window | null = null;
+    try {
+      if (isDesktopGrid) {
+        const pos = positions[index % positions.length];
+        win = window.open(
+          portal.url,
+          `radar_portal_${index}`,
+          `width=${w},height=${h},left=${pos.left},top=${pos.top},resizable=yes,scrollbars=yes`,
+        );
+      } else {
+        // Note: Omit 'noopener' from windowFeatures so browsers return the Window handle
+        // for accurate popup-blocker detection, then sever win.opener manually for security.
+        win = window.open(portal.url, `_blank`);
+      }
+      if (win) {
+        try {
+          win.opener = null;
+        } catch {
+          // Cross-origin opener assignment may throw in strict sandboxes; safe to ignore
+        }
+      }
+    } catch {
+      win = null;
+    }
+
+    if (win && !win.closed) {
+      openedCount += 1;
+    } else {
+      blockedPortals.push(portal);
+    }
+  });
+
+  return {
+    openedCount,
+    blockedPortals,
+    allPortals: portals,
+  };
+}
 

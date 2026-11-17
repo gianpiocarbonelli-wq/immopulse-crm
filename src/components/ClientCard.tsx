@@ -14,6 +14,7 @@ import {
   MessageSquare,
   Navigation,
   Phone,
+  Search,
   Star,
   StickyNote,
   Sun,
@@ -56,6 +57,7 @@ interface ClientCardProps {
   onSelectTag?: (tag: string) => void;
   onOpenGallery: (id: string, startIndex: number) => void;
   onRequireUpgrade: (reason: string) => void;
+  onSearchPortals?: (client: ClientRecord) => void;
 }
 
 function getStatusDisplay(status: ClientStatus) {
@@ -81,6 +83,7 @@ export function ClientCard({
   onSelectTag,
   onOpenGallery,
   onRequireUpgrade,
+  onSearchPortals,
 }: ClientCardProps) {
   const { lang, locale } = useLanguage();
   const photos = getClientPhotos(client);
@@ -589,6 +592,18 @@ export function ClientCard({
           </span>
         )}
       </div>
+
+      {onSearchPortals && (
+        <button
+          type="button"
+          data-testid={`client-search-portals-${client.id}`}
+          onClick={() => onSearchPortals(client)}
+          className="mt-2.5 w-full py-2 px-3 rounded-lg bg-[#177858] hover:bg-[#0e4d5f] text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors active:scale-95"
+        >
+          <Search className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+          <span>{lang === 'en' ? 'Search on 4 Portals' : 'Cerca su 4 Portali'}</span>
+        </button>
+      )}
     </article>
   );
 }

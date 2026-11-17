@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildSupportEmailUrl,
   buildSupportWhatsAppUrl,
+  formatPrice,
   getLegalDocument,
   LEGAL_DOC_ORDER,
   LEGAL_OWNER_NAME,
@@ -10,6 +11,7 @@ import {
   STRIPE_CUSTOMER_PORTAL_URL,
   STRIPE_MONTHLY_CHECKOUT_URL,
   STRIPE_PRO_CHECKOUT_URL,
+  SUBSCRIPTION_CONFIG,
   SUPPORT_EMAIL,
 } from './legalAndSupport';
 
@@ -63,3 +65,24 @@ test('Stripe Customer Portal URL, Checkout URLs, and support email/WhatsApp URLs
   assert.ok(decodeURIComponent(waUrl).includes('supporto tecnico'));
   assert.ok(decodeURIComponent(waUrl).includes('AGENCY'));
 });
+
+test('SUBSCRIPTION_CONFIG and formatPrice lock currency to EUR without local RON conversion', () => {
+  assert.equal(SUBSCRIPTION_CONFIG.currency, 'EUR');
+  assert.equal(SUBSCRIPTION_CONFIG.currencySymbol, '€');
+  assert.equal(SUBSCRIPTION_CONFIG.plans.monthly.priceEUR, 16.99);
+  assert.equal(SUBSCRIPTION_CONFIG.plans.monthly.label, '16,99 € al mese');
+
+  const formattedMonthly = formatPrice(SUBSCRIPTION_CONFIG.plans.monthly.priceEUR);
+  assert.ok(formattedMonthly.includes('16,99'));
+  assert.ok(formattedMonthly.includes('€'));
+  assert.ok(!formattedMonthly.includes('RON'));
+
+  const formattedAnnual = formatPrice(SUBSCRIPTION_CONFIG.plans.annual.priceEUR);
+  assert.ok(formattedAnnual.includes('99,00'));
+  assert.ok(formattedAnnual.includes('€'));
+
+  const formattedAgency = formatPrice(SUBSCRIPTION_CONFIG.plans.agency.priceEUR);
+  assert.ok(formattedAgency.includes('149,00'));
+  assert.ok(formattedAgency.includes('€'));
+});
+

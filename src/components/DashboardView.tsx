@@ -22,6 +22,7 @@ import type { ClientRecord, UpcomingDayBucket } from '../types/crm';
 import { buildUpcoming7DaysBuckets, buildWhatsAppUrl, getClientNote } from '../utils/crmLogic';
 import { useLanguage } from '../contexts/LanguageContext';
 import { type AppLanguage, translatePropertyType, translateRole } from '../utils/i18n';
+import { PortalRadar } from './PortalRadar';
 
 interface DashboardViewProps {
   pool: ClientRecord[];
@@ -33,6 +34,7 @@ interface DashboardViewProps {
   onEdit: (id: string) => void;
   onOpenFullAgenda: () => void;
   onRequireUpgrade: (reason: string) => void;
+  onNotify?: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
 
 interface CustomTooltipProps {
@@ -77,6 +79,7 @@ export function DashboardView({
   onEdit,
   onOpenFullAgenda,
   onRequireUpgrade,
+  onNotify,
 }: DashboardViewProps) {
   const { lang, locale } = useLanguage();
   const isEn = lang === 'en';
@@ -229,6 +232,16 @@ export function DashboardView({
             );
           })}
         </div>
+      </div>
+
+      {/* Portal Radar 4-Portali Widget */}
+      <div className="my-6">
+        <PortalRadar
+          defaultCity="Milano"
+          defaultMaxPrice="300000"
+          defaultRooms="3"
+          onNotify={onNotify}
+        />
       </div>
 
       {/* Filtered Agenda Section */}

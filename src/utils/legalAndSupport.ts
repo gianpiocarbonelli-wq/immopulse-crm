@@ -12,6 +12,34 @@ export const STRIPE_ANNUAL_CHECKOUT_URL =
 export const STRIPE_PRO_CHECKOUT_URL =
   'https://buy.stripe.com/dRm28q34f6Bff1s77n1B605';
 
+// Configurazione fissa della valuta in Euro per evitare il rilevamento automatico del RON
+export const SUBSCRIPTION_CONFIG = {
+  currency: 'EUR',
+  currencySymbol: '€',
+  plans: {
+    monthly: {
+      priceEUR: 16.99, // Corrispettivo fisso in euro (equivalente di 82.88 RON senza conversioni locali)
+      label: '16,99 € al mese',
+    },
+    annual: {
+      priceEUR: 99.0,
+      label: '99,00 € / anno',
+    },
+    agency: {
+      priceEUR: 149.0,
+      label: '149,00 € / anno',
+    },
+  },
+} as const;
+
+// Funzione di formattazione del prezzo pulita senza conversioni valutarie locali
+export function formatPrice(amountInEUR: number): string {
+  return new Intl.NumberFormat('it-IT', {
+    style: 'currency',
+    currency: SUBSCRIPTION_CONFIG.currency,
+  }).format(amountInEUR);
+}
+
 export type LegalDocKey = 'privacy' | 'terms' | 'dpa' | 'cookies';
 
 export interface LegalSection {
@@ -89,7 +117,7 @@ export const LEGAL_DOCUMENTS: Record<LegalDocKey, LegalDocument> = {
         heading: '2. Piani Tariffari e Divieto di Condivisione Account (Singolo Pro)',
         paragraphs: [
           'Il piano Ospite / Free (€ 0/mese) consente la gestione di massimo 3 clienti attivi con funzioni base (Chiama ed Email).',
-          'I piani individuali Licenza ImmoPulse (€ 14,90/mese) e Licenza Agente ImmoPulse Pro (€ 99,00/anno) concedono una licenza d’uso strettamente personale e non trasferibile. È espressamente vietata la condivisione dell’account, delle credenziali di accesso o della licenza personale con altri agenti, colleghi o collaboratori. La violazione del divieto comporta la sospensione immediata del piano senza rimborso.',
+          'I piani individuali Licenza ImmoPulse (€ 16,99/mese) e Licenza Agente ImmoPulse Pro (€ 99,00/anno) concedono una licenza d’uso strettamente personale e non trasferibile. È espressamente vietata la condivisione dell’account, delle credenziali di accesso o della licenza personale con altri agenti, colleghi o collaboratori. La violazione del divieto comporta la sospensione immediata del piano senza rimborso.',
           'Per la collaborazione simultanea tra più agenti e dispositivi (PC, tablet e smartphone) e operatività avanzata è disponibile la Licenza Agenzia ImmoPulse Pro (149,00 € / anno).',
         ],
       },
@@ -242,7 +270,7 @@ export const LEGAL_DOCUMENTS_EN: Record<LegalDocKey, LegalDocument> = {
         heading: '2. Subscription Plans and Account-Sharing Prohibition (Individual Pro)',
         paragraphs: [
           'The Guest / Free plan (€ 0/month) allows managing up to 3 active clients with basic features (Call and Email).',
-          'Individual plans ImmoPulse License (14,90 € / month) and ImmoPulse Agent Pro License (99,00 € / year) grant a strictly personal and non-transferable license. Sharing accounts, login credentials, or personal licenses with other agents, colleagues, or collaborators is strictly prohibited. Violation results in immediate plan suspension without refund.',
+          'Individual plans ImmoPulse License (16,99 € / month) and ImmoPulse Agent Pro License (99,00 € / year) grant a strictly personal and non-transferable license. Sharing accounts, login credentials, or personal licenses with other agents, colleagues, or collaborators is strictly prohibited. Violation results in immediate plan suspension without refund.',
           'For simultaneous multi-agent and multi-device collaboration (PC, tablet, and smartphone) and advanced team operations, the ImmoPulse Agency Pro License (149,00 € / year) is available.',
         ],
       },

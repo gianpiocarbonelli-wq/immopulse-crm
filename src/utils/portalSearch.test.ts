@@ -8,6 +8,7 @@ import {
   buildIdealistaDirectUrl,
   buildIdealistaProvinciaUrl,
   buildPortalVerificationUrl,
+  buildRadarPortalUrls,
   buildSearchQueryWithFilters,
   buildSimplePortalQuery,
   cloneDefaultPortals,
@@ -17,6 +18,7 @@ import {
   normalizeCitySlug,
   normalizeCustomFeatures,
   normalizePortalUrl,
+  parseRoomsCount,
   removePortalFromList,
   resolvePortalCitySlug,
   sanitizePortalsList,
@@ -268,7 +270,7 @@ test('normalizeCitySlug, buildDirectPortalSearchUrl, and buildGooglePortalQuickS
   );
   assert.equal(
     buildDirectPortalSearchUrl(casa, rentInput),
-    'https://www.casa.it/affitto/residenziale/monza/?prezzoMax=1100',
+    'https://www.casa.it/affitto/residenziale/monza/?priceMax=1100',
   );
 
   // 5. Quick Google Results button across all 4 cards
@@ -300,7 +302,7 @@ test('smart main-bar parsing and neighborhood city extraction prevent 404 URLs a
   );
   assert.equal(
     buildDirectPortalSearchUrl(casa, freeTextSale),
-    'https://www.casa.it/vendita/residenziale/milano/?prezzoMax=300000',
+    'https://www.casa.it/vendita/residenziale/milano/?priceMax=300000',
   );
   const subFreeUrl = new URL(buildDirectPortalSearchUrl(subito, freeTextSale));
   assert.equal(subFreeUrl.pathname, '/annunci-italia/vendita/immobili/');
@@ -339,4 +341,44 @@ test('smart main-bar parsing and neighborhood city extraction prevent 404 URLs a
     'https://www.idealista.it/vendita-case/milano-provincia/con-prezzo_320000/',
   );
 });
+
+test('parseRoomsCount and buildRadarPortalUrls generate complete filtered URLs for Radar and ClientCard', () => {
+  assert.equal(parseRoomsCount('3 Vani'), '3');
+  assert.equal(parseRoomsCount('2 locali'), '2');
+  assert.equal(parseRoomsCount(''), '');
+
+  const targets = buildRadarPortalUrls({
+    city: 'Milano',
+    maxPrice: '300000',
+    rooms: '3',
+    contract: 'vendita',
+    onlyPrivate: true,
+  });
+  assert.equal(targets.length, 4);
+
+  const imm = targets.find((t) => t.host === 'immobiliare.it')!;
+  const ide = targets.find((t) => t.host === 'idealista.it')!;
+  const cas = targets.find((t) => t.host === 'casa.it')!;
+  const sub = targets.find((t) => t.host === 'subito.it')!;
+
+  assert.ok(imm.url.includes('/vendita-case/milano/'));
+  assert.ok(imm.url.includes('prezzoMassimo=300000'));
+  assert.ok(imm.url.includes('localiMinimo=3'));
+  assert.ok(imm.url.includes('idMZona=privati'));
+
+  assert.equal(
+    ide.url,
+    'https://www.idealista.it/vendita-case/milano-provincia/con-prezzo_300000,trilocali,quadrilocali,solo-privati/?ordine=pubblicazione-desc',
+  );
+
+  assert.ok(cas.url.includes('/vendita/residenziale/milano/'));
+  assert.ok(cas.url.includes('priceMax=300000'));
+  assert.ok(cas.url.includes('roomsMin=3'));
+  assert.ok(cas.url.includes('sellerType=private'));
+
+  assert.ok(sub.url.includes('/vendita/appartamenti/'));
+  assert.ok(sub.url.includes('pe=300000'));
+  assert.ok(sub.url.includes('advt=0'));
+});
+
 

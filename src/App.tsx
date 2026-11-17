@@ -43,6 +43,7 @@ import { GalleryModal } from './components/GalleryModal';
 import { LegalInfoModal } from './components/LegalInfoModal';
 import { MatchingView } from './components/MatchingView';
 import { MetricsStrip } from './components/MetricsStrip';
+import { MultiPortalLauncherModal } from './components/MultiPortalLauncherModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { PlansModal } from './components/PlansModal';
 import { PWAInstallButton } from './components/PWAInstallButton';
@@ -73,6 +74,7 @@ import {
   computeSubscriptionExpiry,
   evaluateSubscriptionStatus,
   filterAndSortClients,
+  formatCurrencyEUR,
   generateCsvContent,
   generateDemoClients,
   getActivePlan,
@@ -105,6 +107,13 @@ import {
   LEGAL_OWNER_NAME,
   type LegalDocKey,
 } from './utils/legalAndSupport';
+import {
+  buildRadarPortalUrls,
+  extractClientCityAndZone,
+  type MultiPortalLaunchItem,
+  openMultiPortalWindows,
+  parseRoomsCount,
+} from './utils/portalSearch';
 import {
   clearAgencyWorkspace,
   clearLicenseCode,
@@ -375,6 +384,13 @@ export default function App() {
     photos: string[];
     initialIndex: number;
   }>({ isOpen: false, clientName: '', photos: [], initialIndex: 0 });
+  const [portalLauncherState, setPortalLauncherState] = useState<{
+    isOpen: boolean;
+    title: string;
+    subtitle?: string;
+    portals: MultiPortalLaunchItem[];
+    blockedCount: number;
+  }>({ isOpen: false, title: '', portals: [], blockedCount: 0 });
 
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [activeLegalDoc, setActiveLegalDoc] = useState<LegalDocKey | null>(null);
@@ -416,8 +432,8 @@ export default function App() {
               ? 'Stripe payment confirmed! Annual Plan (€ 99,00/year) activated successfully.'
               : 'Pagamento Stripe confermato! Piano Annuale (€ 99,00/anno) attivato con successo.'
             : isEn
-              ? 'Stripe payment confirmed! Monthly Plan (€ 14,90/month) activated successfully.'
-              : 'Pagamento Stripe confermato! Piano Mensile (€ 14,90/mese) attivato con successo.',
+              ? 'Stripe payment confirmed! Monthly Plan (€ 16,99/month) activated successfully.'
+              : 'Pagamento Stripe confermato! Piano Mensile (€ 16,99/mese) attivato con successo.',
         'success',
       );
       if (typeof window !== 'undefined' && hasPaidRedirectParam(window.location.search)) {
@@ -697,8 +713,8 @@ export default function App() {
       if (!currentUser) {
         openPlansModal(
           isEn
-            ? `${reason} Sign in or activate Monthly (€ 14,90/month), Annual (€ 99,00/year), or Pro Plan (€ 149,00).`
-            : `${reason} Accedi o attiva Piano Mensile (€ 14,90/mese), Annuale (€ 99,00/anno) o Piano Pro (€ 149,00).`,
+            ? `${reason} Sign in or activate Monthly (€ 16,99/month), Annual (€ 99,00/year), or Pro Plan (€ 149,00).`
+            : `${reason} Accedi o attiva Piano Mensile (€ 16,99/mese), Annuale (€ 99,00/anno) o Piano Pro (€ 149,00).`,
         );
       } else {
         openPlansModal(reason);
@@ -837,12 +853,49 @@ export default function App() {
     });
   };
 
+  const handleSearchPortalsForClient = (client: ClientRecord) => {
+    const { cityZone } = extractClientCityAndZone(client.zone, client.address);
+    const city = cityZone || 'Milano';
+    const contract: 'vendita' | 'affitto' =
+      client.role === 'Inquilino' || client.role === 'Locatore' ? 'affitto' : 'vendita';
+    const rooms = parseRoomsCount(client.rooms);
+    const maxPrice = client.price > 0 ? String(Math.round(client.price)) : '';
+    const targets = buildRadarPortalUrls({
+      city,
+      maxPrice,
+      rooms,
+      contract,
+      onlyPrivate: false,
+      extraQuery: client.propertyType || '',
+    });
+
+    const result = openMultiPortalWindows(targets, 'tabs');
+    if (result.blockedPortals.length > 0) {
+      setPortalLauncherState({
+        isOpen: true,
+        title: isEn
+          ? `4 Portals Ready for ${client.name}`
+          : `4 Portali Pronti per ${client.name}`,
+        subtitle: `${city}${maxPrice ? ` · ≤ ${formatCurrencyEUR(Number(maxPrice), lang)}` : ''}`,
+        portals: result.allPortals,
+        blockedCount: result.blockedPortals.length,
+      });
+    } else {
+      showToast(
+        isEn
+          ? `Opened all 4 portals for ${client.name}.`
+          : `Aperti tutti e 4 i portali per ${client.name}.`,
+        'success',
+      );
+    }
+  };
+
   const handleLoad50Demo = () => {
     if (clientLimit < 50) {
       openPlansModal(
         isEn
-          ? `Loading 50 demo clients requires the Monthly (€ 14,90/month), Annual (€ 99,00/year), or Pro Plan (€ 149,00). Your current plan allows up to ${clientLimit} clients.`
-          : `Il caricamento di 50 clienti demo richiede il Piano Mensile (€ 14,90/mese), Annuale (€ 99,00/anno) o Piano Pro (€ 149,00). Il tuo piano attuale consente massimo ${clientLimit} clienti.`,
+          ? `Loading 50 demo clients requires the Monthly (€ 16,99/month), Annual (€ 99,00/year), or Pro Plan (€ 149,00). Your current plan allows up to ${clientLimit} clients.`
+          : `Il caricamento di 50 clienti demo richiede il Piano Mensile (€ 16,99/mese), Annuale (€ 99,00/anno) o Piano Pro (€ 149,00). Il tuo piano attuale consente massimo ${clientLimit} clienti.`,
       );
       return;
     }
@@ -1074,8 +1127,8 @@ export default function App() {
     setPendingPlanAfterAuth(null);
     openPlansModal(
       isEn
-        ? 'Account created! Choose Monthly (€ 14,90/month), Annual (€ 99,00/year), or Pro Plan (€ 149,00).'
-        : 'Account creato! Scegli Piano Mensile (€ 14,90/mese), Annuale (€ 99,00/anno) o Piano Pro (€ 149,00).',
+        ? 'Account created! Choose Monthly (€ 16,99/month), Annual (€ 99,00/year), or Pro Plan (€ 149,00).'
+        : 'Account creato! Scegli Piano Mensile (€ 16,99/mese), Annuale (€ 99,00/anno) o Piano Pro (€ 149,00).',
       nextPlan,
     );
     return null;
@@ -1751,13 +1804,13 @@ export default function App() {
                 ) : isEn ? (
                   <>
                     <strong>Stripe payment completed!</strong> Your{' '}
-                    <strong>Monthly Plan (€ 14,90/month)</strong> has been activated automatically:
+                    <strong>Monthly Plan (€ 16,99/month)</strong> has been activated automatically:
                     unlimited clients, WhatsApp, Maps, PDF Export, +50 Demo, and Backup are ready.
                   </>
                 ) : (
                   <>
                     <strong>Pagamento completato con Stripe!</strong> Il tuo{' '}
-                    <strong>Piano Mensile (€ 14,90/mese)</strong> è stato attivato automaticamente:
+                    <strong>Piano Mensile (€ 16,99/mese)</strong> è stato attivato automaticamente:
                     clienti illimitati, WhatsApp, Maps, Export PDF, +50 Demo e Backup sono subito
                     disponibili.
                   </>
@@ -2366,6 +2419,7 @@ export default function App() {
                         });
                       }}
                       onRequireUpgrade={requireUpgrade}
+                      onSearchPortals={handleSearchPortalsForClient}
                     />
                   ))}
                 </div>
@@ -2384,6 +2438,7 @@ export default function App() {
               onEdit={openEditClientModal}
               onOpenFullAgenda={() => setActiveTab('reminders')}
               onRequireUpgrade={requireUpgrade}
+              onNotify={showToast}
             />
           )}
 
@@ -3103,6 +3158,32 @@ export default function App() {
       )}
 
       <ConfirmDialog dialog={confirmDialog} onCancel={() => setConfirmDialog(null)} />
+
+      <MultiPortalLauncherModal
+        isOpen={portalLauncherState.isOpen}
+        title={portalLauncherState.title}
+        subtitle={portalLauncherState.subtitle}
+        portals={portalLauncherState.portals}
+        blockedCount={portalLauncherState.blockedCount}
+        onClose={() => setPortalLauncherState((prev) => ({ ...prev, isOpen: false }))}
+        onCopyAll={async () => {
+          const text = portalLauncherState.portals
+            .map((p) => `${p.name}: ${p.url}`)
+            .join('\n');
+          try {
+            await navigator.clipboard.writeText(text);
+            showToast(
+              isEn ? 'All 4 portal URLs copied.' : 'Tutti e 4 i link copiati negli appunti.',
+              'success',
+            );
+          } catch {
+            showToast(
+              isEn ? 'Click any portal button above.' : 'Clicca i portali direttamente qui sopra.',
+              'info',
+            );
+          }
+        }}
+      />
 
       <RealEstateChatbot
         clients={visiblePool}

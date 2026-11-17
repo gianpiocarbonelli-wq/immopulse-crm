@@ -1,13 +1,17 @@
 import { type FormEvent, useMemo, useState } from 'react';
 import {
+  AlertCircle,
   Building2,
+  Copy,
   ExternalLink,
   Globe,
   Layers,
+  LayoutGrid,
   MapPin,
   Search,
   Sparkles,
   UserCheck,
+  X,
 } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import type { ClientRecord, PropertyPortalConfig } from '../types/crm';
@@ -15,12 +19,14 @@ import { formatCurrencyEUR } from '../utils/crmLogic';
 import { translatePropertyType, translateRole } from '../utils/i18n';
 import {
   DEFAULT_ITALIAN_PORTALS,
+  type MultiPortalLaunchItem,
   type SimplePortalSearchInput,
   buildDirectPortalSearchUrl,
   buildGooglePortalQuickSearchUrl,
   buildSimplePortalQuery,
   extractClientCityAndZone,
   extractPortalHostname,
+  openMultiPortalWindows,
   resolveSimplePortalSearchInput,
 } from '../utils/portalSearch';
 
@@ -58,8 +64,8 @@ const PORTAL_META: Record<
   'casa.it': {
     badgeBg: 'bg-amber-50 border-amber-200',
     badgeText: 'text-amber-800',
-    taglineIt: 'Percorso diretto Casa.it per città e contratto',
-    taglineEn: 'Direct Casa.it city path for sale & rent',
+    taglineIt: 'Percorso diretto Casa.it per città, contratto e priceMax',
+    taglineEn: 'Direct Casa.it city path with contract & max price',
   },
 };
 
@@ -74,9 +80,11 @@ export function FindPropertyView({
   const [selectedClientId, setSelectedClientId] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [contract, setContract] = useState<'tutti' | 'vendita' | 'affitto'>('vendita');
-  const [cityZone, setCityZone] = useState<string>('');
+  const [cityZone, setCityZone] = useState<string>('Milano');
   const [maxPrice, setMaxPrice] = useState<string>('');
+  const [openMode, setOpenMode] = useState<'tabs' | 'grid'>('tabs');
   const [highlightCards, setHighlightCards] = useState(false);
+  const [blockedFallback, setBlockedFallback] = useState<MultiPortalLaunchItem[]>([]);
 
   // Always resolve the 4 Italian portals cleanly in fixed order
   const fourPortals = useMemo<PropertyPortalConfig[]>(() => {
@@ -148,9 +156,10 @@ export function FindPropertyView({
     ].filter(Boolean);
 
     setContract(nextContract);
-    setCityZone(resolvedCityZone);
+    setCityZone(resolvedCityZone || 'Milano');
     setMaxPrice(nextMaxPrice);
     setSearchQuery(parts.join(' '));
+    setBlockedFallback([]);
     setHighlightCards(true);
     window.setTimeout(() => setHighlightCards(false), 700);
 
@@ -185,6 +194,7 @@ export function FindPropertyView({
       setContract(activeInput.contract);
     }
 
+    setBlockedFallback([]);
     setHighlightCards(true);
     window.setTimeout(() => setHighlightCards(false), 700);
     onNotify(
@@ -196,27 +206,47 @@ export function FindPropertyView({
   };
 
   const handleOpenAllFour = () => {
-    let blockedCount = 0;
-    for (const card of portalCards) {
-      const opened = window.open(card.directUrl, '_blank', 'noopener,noreferrer');
-      if (!opened) {
-        blockedCount += 1;
-      }
-    }
+    const launchList: MultiPortalLaunchItem[] = portalCards.map((card) => ({
+      id: card.portal.id,
+      name: card.portal.name,
+      host: card.host,
+      url: card.directUrl,
+      googleUrl: card.googleUrl,
+    }));
 
-    if (blockedCount > 0) {
+    const result = openMultiPortalWindows(launchList, openMode);
+
+    if (result.blockedPortals.length > 0) {
+      setBlockedFallback(result.blockedPortals);
       onNotify(
         isEn
-          ? 'Your browser blocked some tabs. Allow pop-ups for this site to open all 4 portals together.'
-          : 'Alcune schede sono state bloccate dal browser: consenti i pop-up per aprire tutti e 4 i portali insieme.',
+          ? `Browser blocked ${result.blockedPortals.length} tab(s). Use the instant launch buttons below.`
+          : `Il browser ha bloccato ${result.blockedPortals.length} schede (pop-up). Usa i pulsanti diretti qui sotto per aprirli in 1 clic.`,
         'info',
       );
     } else {
+      setBlockedFallback([]);
       onNotify(
         isEn
-          ? 'Opened all 4 property portals in new tabs.'
-          : 'Aperti tutti e 4 i portali immobiliari in nuove schede.',
+          ? 'Opened all 4 property portals together.'
+          : 'Aperti tutti e 4 i portali immobiliari insieme.',
         'success',
+      );
+    }
+  };
+
+  const handleCopyAllLinks = async () => {
+    const text = portalCards.map((c) => `${c.portal.name}: ${c.directUrl}`).join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      onNotify(
+        isEn ? 'All 4 portal URLs copied to clipboard.' : 'Tutti e 4 i link copiati negli appunti.',
+        'success',
+      );
+    } catch {
+      onNotify(
+        isEn ? 'Use the direct portal buttons below.' : 'Usa i pulsanti diretti dei 4 portali qui sotto.',
+        'info',
       );
     }
   };
@@ -241,8 +271,8 @@ export function FindPropertyView({
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-[#eaf3f2]">
           <div>
             <h2 className="text-lg font-extrabold text-[#0e4d5f] flex items-center gap-2">
-              <Search className="w-5 h-5 text-[#177858]" />
-              {isEn ? 'Find Property on 4 Portals' : 'Cerca Immobile sui 4 Portali'}
+              <Search className="w-5 h-5 text-[#177858]" aria-hidden="true" />
+              <span>{isEn ? 'Find Property on 4 Portals' : 'Cerca Immobile sui 4 Portali'}</span>
             </h2>
             <p className="text-xs text-[#4f727d] mt-0.5">
               {isEn
@@ -257,8 +287,8 @@ export function FindPropertyView({
               htmlFor="quick-client-load"
               className="text-[11px] font-bold uppercase tracking-wider text-[#4f727d] flex items-center gap-1.5 mb-1"
             >
-              <UserCheck className="w-3.5 h-3.5 text-[#177858]" />
-              {isEn ? 'Load from Client' : 'Carica da Cliente'}
+              <UserCheck className="w-3.5 h-3.5 text-[#177858]" aria-hidden="true" />
+              <span>{isEn ? 'Load from Client' : 'Carica da Cliente'}</span>
             </label>
             <select
               id="quick-client-load"
@@ -302,7 +332,7 @@ export function FindPropertyView({
                 {isEn ? 'What are you looking for?' : 'Cosa cerchi?'}
               </label>
               <div className="relative">
-                <Search className="w-4 h-4 text-[#4f727d] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <Search className="w-4 h-4 text-[#4f727d] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" aria-hidden="true" />
                 <input
                   id="portal-main-search"
                   data-testid="portal-search-input"
@@ -314,8 +344,18 @@ export function FindPropertyView({
                       ? 'e.g. 3-room Milan Navigli 300000'
                       : 'Es. "Trilocale Milano Navigli 300000"'
                   }
-                  className="w-full pl-9 pr-3 py-2.5 text-sm bg-white border border-[#cbe2de] rounded-lg text-[#0e4d5f] placeholder:text-[#7f9da6] focus:outline-none focus:ring-2 focus:ring-[#2eb086]"
+                  className="w-full pl-9 pr-8 py-2.5 text-sm bg-white border border-[#cbe2de] rounded-lg text-[#0e4d5f] placeholder:text-[#7f9da6] focus:outline-none focus:ring-2 focus:ring-[#2eb086]"
                 />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    aria-label={isEn ? 'Clear search text' : 'Pulisci testo ricerca'}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[#7f9da6] hover:text-[#0e4d5f]"
+                  >
+                    <X className="w-3.5 h-3.5" aria-hidden="true" />
+                  </button>
+                )}
               </div>
             </div>
 
@@ -351,7 +391,7 @@ export function FindPropertyView({
                 {isEn ? 'City / Area' : 'Città / Zona'}
               </label>
               <div className="relative">
-                <MapPin className="w-3.5 h-3.5 text-[#4f727d] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <MapPin className="w-3.5 h-3.5 text-[#4f727d] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" aria-hidden="true" />
                 <input
                   id="portal-city-input"
                   data-testid="filter-city-zone"
@@ -359,8 +399,18 @@ export function FindPropertyView({
                   value={cityZone}
                   onChange={(e) => setCityZone(e.target.value)}
                   placeholder={isEn ? 'e.g. Milan Navigli' : 'es. Milano Navigli'}
-                  className="w-full pl-8 pr-2.5 py-2.5 text-sm bg-white border border-[#cbe2de] rounded-lg text-[#0e4d5f] placeholder:text-[#7f9da6] focus:outline-none focus:ring-2 focus:ring-[#2eb086]"
+                  className="w-full pl-8 pr-7 py-2.5 text-sm bg-white border border-[#cbe2de] rounded-lg text-[#0e4d5f] placeholder:text-[#7f9da6] focus:outline-none focus:ring-2 focus:ring-[#2eb086]"
                 />
+                {cityZone && (
+                  <button
+                    type="button"
+                    onClick={() => setCityZone('')}
+                    aria-label={isEn ? 'Clear city' : 'Pulisci città'}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 text-[#7f9da6] hover:text-[#0e4d5f]"
+                  >
+                    <X className="w-3.5 h-3.5" aria-hidden="true" />
+                  </button>
+                )}
               </div>
             </div>
 
@@ -392,7 +442,7 @@ export function FindPropertyView({
                 data-testid="search-portals-btn"
                 className="w-full py-2.5 px-4 bg-[#177858] hover:bg-[#0e4d5f] text-white text-sm font-bold rounded-lg shadow-xs transition-colors flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer"
               >
-                <Search className="w-4 h-4 shrink-0" />
+                <Search className="w-4 h-4 shrink-0" aria-hidden="true" />
                 <span>{isEn ? 'Search 4 Portals' : 'Cerca nei 4 Portali'}</span>
               </button>
             </div>
@@ -418,10 +468,10 @@ export function FindPropertyView({
 
       {/* Bulk Action + 4 Direct Portal Cards */}
       <section className="space-y-3">
-        <div className="bg-white border border-[#cbe2de] rounded-xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div className="bg-white border border-[#cbe2de] rounded-xl p-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           <div className="space-y-1">
             <div className="flex items-center gap-2 text-sm font-bold text-[#0e4d5f]">
-              <Layers className="w-4 h-4 text-[#177858]" />
+              <Layers className="w-4 h-4 text-[#177858]" aria-hidden="true" />
               <span>
                 {isEn
                   ? 'Ready Direct Links on All 4 Portals'
@@ -442,23 +492,104 @@ export function FindPropertyView({
             </p>
           </div>
 
-          <div className="flex flex-col items-stretch sm:items-end gap-1.5 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {/* Open Mode Toggle (Tabs vs 2x2 Desktop Grid) */}
+            <div className="hidden md:flex bg-[#f4faf9] p-1 rounded-lg border border-[#cbe2de]">
+              <button
+                type="button"
+                onClick={() => setOpenMode('tabs')}
+                className={`px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1 transition ${
+                  openMode === 'tabs'
+                    ? 'bg-[#0e4d5f] text-white'
+                    : 'text-[#4f727d] hover:text-[#0e4d5f]'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>{isEn ? '4 Tabs' : '4 Schede'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setOpenMode('grid')}
+                className={`px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1 transition ${
+                  openMode === 'grid'
+                    ? 'bg-[#0e4d5f] text-white'
+                    : 'text-[#4f727d] hover:text-[#0e4d5f]'
+                }`}
+              >
+                <LayoutGrid className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>{isEn ? '2x2 Grid' : 'Griglia 2x2'}</span>
+              </button>
+            </div>
+
             <button
               type="button"
               data-testid="open-all-portals-btn"
               onClick={handleOpenAllFour}
-              className="px-4 py-2.5 rounded-lg bg-[#0e4d5f] hover:bg-[#177858] text-white text-xs sm:text-sm font-bold shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+              className="w-full sm:w-auto px-4 py-2.5 rounded-lg bg-[#0e4d5f] hover:bg-[#177858] text-white text-xs sm:text-sm font-bold shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
             >
-              <ExternalLink className="w-4 h-4" />
+              <ExternalLink className="w-4 h-4 shrink-0" aria-hidden="true" />
               <span>{isEn ? 'Open all 4 together' : 'Apri tutti e 4 insieme'}</span>
             </button>
-            <p className="text-[11px] text-[#4f727d] text-left sm:text-right">
-              {isEn
-                ? 'Make sure to allow pop-ups in your browser to open all 4 tabs together.'
-                : 'Assicurati di consentire i pop-up nel browser per aprire tutte e 4 le schede insieme.'}
-            </p>
           </div>
         </div>
+
+        {/* Interactive Popup-Blocked Fallback Strip */}
+        {blockedFallback.length > 0 && (
+          <div
+            role="status"
+            data-testid="find-popup-fallback"
+            className="bg-amber-50 border border-amber-300 rounded-xl p-4 space-y-3"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start gap-2 text-xs text-amber-950">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" aria-hidden="true" />
+                <div>
+                  <div className="font-bold">
+                    {isEn
+                      ? `${blockedFallback.length} tab(s) blocked by browser pop-up blocker`
+                      : `Il browser ha bloccato ${blockedFallback.length} schede simultanee (blocco pop-up)`}
+                  </div>
+                  <p className="text-amber-900 mt-0.5">
+                    {isEn
+                      ? 'Tap the portal buttons below directly (1 click each) or allow pop-ups for this site:'
+                      : 'Clicca direttamente i portali qui sotto per aprirli senza blocchi (oppure consenti i pop-up):'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setBlockedFallback([])}
+                aria-label={isEn ? 'Dismiss notice' : 'Chiudi avviso'}
+                className="p-1 text-amber-700 hover:text-amber-950"
+              >
+                <X className="w-4 h-4" aria-hidden="true" />
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {blockedFallback.map((item) => (
+                <a
+                  key={`fallback-${item.name}`}
+                  href={item.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-2 rounded-lg bg-[#177858] hover:bg-[#0e4d5f] text-white text-xs font-bold inline-flex items-center gap-1.5"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>{isEn ? `Open ${item.name}` : `Apri ${item.name}`}</span>
+                </a>
+              ))}
+              <button
+                type="button"
+                onClick={handleCopyAllLinks}
+                className="px-3 py-2 rounded-lg bg-white hover:bg-amber-100 text-amber-950 border border-amber-300 text-xs font-semibold inline-flex items-center gap-1.5"
+              >
+                <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>{isEn ? 'Copy all 4 links' : 'Copia tutti e 4 i link'}</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* 4 Portal Cards Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -478,7 +609,7 @@ export function FindPropertyView({
                     <div
                       className={`w-9 h-9 rounded-lg border flex items-center justify-center shrink-0 ${meta.badgeBg}`}
                     >
-                      <Building2 className={`w-4 h-4 ${meta.badgeText}`} />
+                      <Building2 className={`w-4 h-4 ${meta.badgeText}`} aria-hidden="true" />
                     </div>
                     <div>
                       <h3 className="text-base font-extrabold text-[#0e4d5f] leading-tight">
@@ -533,7 +664,7 @@ export function FindPropertyView({
                   data-testid={`open-direct-${host}`}
                   className="py-2.5 px-3 rounded-lg bg-[#177858] hover:bg-[#0e4d5f] text-white text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 text-center"
                 >
-                  <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                  <ExternalLink className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                   <span>{isEn ? `Open on ${portal.name}` : `Apri su ${portal.name}`}</span>
                 </a>
 
@@ -544,7 +675,7 @@ export function FindPropertyView({
                   data-testid={`open-google-${host}`}
                   className="py-2.5 px-3 rounded-lg bg-[#f4faf9] hover:bg-[#e3f3f0] text-[#0e4d5f] border border-[#cbe2de] text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 text-center"
                 >
-                  <Globe className="w-3.5 h-3.5 text-[#177858] shrink-0" />
+                  <Globe className="w-3.5 h-3.5 text-[#177858] shrink-0" aria-hidden="true" />
                   <span>{isEn ? 'Quick Google Results' : 'Risultati Rapidi Google'}</span>
                 </a>
               </div>
@@ -553,7 +684,7 @@ export function FindPropertyView({
         </div>
 
         <div className="flex items-center gap-2 text-[11px] text-[#4f727d] px-1">
-          <Sparkles className="w-3.5 h-3.5 text-[#177858] shrink-0" />
+          <Sparkles className="w-3.5 h-3.5 text-[#177858] shrink-0" aria-hidden="true" />
           <span>
             {isEn
               ? 'Tip: If a portal asks for exact neighborhood disambiguation, use "Quick Google Results" for instant 0-404 indexed listings.'
